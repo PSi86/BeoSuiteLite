@@ -1,0 +1,9 @@
+# BeoSuiteLite deploys to Linux (Raspberry Pi OS). Force LF line endings for all
+# text files so shell scripts, systemd units and configs work regardless of the
+# platform a contributor clones on.
+* text=auto eol=lf
+
+# Binary assets
+*.gpg binary
+*.xml text eol=lf
+*.svg text eol=lf
