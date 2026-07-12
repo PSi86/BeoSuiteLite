@@ -1,33 +1,33 @@
-# go-librespot (Spotify Connect) für Beocreate
-# Ablage auf dem Pi: /home/pi/.config/go-librespot/config.yml (Eigentümer pi)
+# go-librespot (Spotify Connect) for Beocreate
+# Location on the Pi: /home/pi/.config/go-librespot/config.yml (owner: pi)
 #
-# LAUTSTÄRKE-SICHERHEIT: Die eigentliche (analoge) Lautstärke regelt ausschließlich
-# der DSP-Master (ALSA "DSPVolume" / DSP-Register 106) über die Beocreate-UI.
-# go-librespots eigene Lautstärke ist NUR eine zusätzliche digitale Absenkung
-# (external_volume/mixer bewusst NICHT genutzt), damit ein per Spotify verbundenes
-# Handy NIE die Hardware-Lautstärke hochreißen kann. ignore_last_volume=true +
-# niedriges initial_volume => jede neue Verbindung startet leise.
+# VOLUME SAFETY: The actual (analog) volume is controlled solely by the DSP
+# master (ALSA "DSPVolume" / DSP register 106) via the Beocreate UI.
+# go-librespot's own volume is ONLY an additional digital attenuation
+# (external_volume/mixer are deliberately NOT used), so a phone connected via
+# Spotify can NEVER drive the hardware volume up. ignore_last_volume=true +
+# a low initial_volume => every new connection starts quietly.
 
 device_name: Beocreate
 device_type: speaker
 
 audio_backend: alsa
-# plughw wandelt Spotifys 44,1 kHz automatisch auf die Geräte-/DSP-Rate (48 kHz).
+# plughw automatically converts Spotify's 44.1 kHz to the device/DSP rate (48 kHz).
 audio_device: plughw:CARD=sndrpihifiberry
 
-bitrate: 320            # 320 kbit/s (nur mit Spotify Premium; sonst Fallback)
+bitrate: 320            # 320 kbit/s (Spotify Premium only; otherwise falls back)
 volume_steps: 100
-initial_volume: 40      # digitale Startlautstärke (zusätzlich zum DSP-Master)
+initial_volume: 40      # digital starting volume (in addition to the DSP master)
 ignore_last_volume: true
-external_volume: false  # keine Mixer-Kopplung -> DSP-Master bleibt alleiniger Regler
+external_volume: false  # no mixer coupling -> the DSP master remains the sole control
 
-zeroconf_enabled: true  # dauerhaft im Spotify-„Connect" auffindbar
-# Über den laufenden avahi-daemon registrieren (statt eigenem mDNS-Responder) —
-# vermeidet den 5353-Konflikt mit avahi/beocreate-dnssd2. So wird das Gerät
-# tatsächlich in der Spotify-App sichtbar.
+zeroconf_enabled: true  # always discoverable in Spotify "Connect"
+# Register via the running avahi-daemon (instead of the built-in mDNS responder) —
+# avoids the 5353 conflict with avahi/beocreate-dnssd2. This is what actually makes
+# the device visible in the Spotify app.
 zeroconf_backend: avahi
 
-server:                 # lokale Steuer-/Event-API für die Bridge (-> Shim :81)
+server:                 # local control/event API for the bridge (-> shim :81)
   enabled: true
   address: localhost
   port: 3678

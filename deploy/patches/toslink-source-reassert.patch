@@ -1,19 +1,19 @@
-Toslink-Extension: Quellen-Re-Assert bei anhaltendem Signal.
+Toslink extension: source re-assert while the signal persists.
 
-Problem: Die toslink-Aktivierung ist EDGE-basiert (nur bei Signalwechsel
-kein-Signal -> Signal). Läuft parallel eine Spotify-Wiedergabe und wird sie
-pausiert, setzt Beocreates determineCurrentSource currentSource=null (es fällt
-nicht auf die tiefer priorisierte, aber noch aktive Optical-Quelle zurück).
-Da das optische Signal durchgehend anliegt, gibt es keine Signalflanke — Optical
-wird nie erneut aktiviert und Now-Playing bleibt leer, obwohl der TOSLINK-Ton
-sofort wieder hörbar ist.
+Problem: toslink activation is EDGE-based (only on a signal transition
+no-signal -> signal). If a Spotify playback runs in parallel and is paused,
+Beocreate's determineCurrentSource sets currentSource=null (it does not fall
+back to the lower-priority but still active Optical source). Since the optical
+signal is present continuously, there is no signal edge — Optical is never
+re-activated and Now-Playing stays empty, even though the TOSLINK audio is
+immediately audible again.
 
-Fix: Beim Polling zusätzlich re-aktivieren, wenn Signal anliegt UND keine Quelle
-aktiv ist (sources.getCurrentSource() == null). Stiehlt Spotify NICHT den Fokus,
-solange Spotify aktiv ist (dann ist getCurrentSource() != null).
+Fix: during polling, additionally re-activate when a signal is present AND no
+source is active (sources.getCurrentSource() == null). Does NOT steal focus
+from Spotify while Spotify is active (then getCurrentSource() != null).
 
-Hinweis: Die vollständige gepatchte Datei liegt versioniert unter
-deploy/beo-extensions/toslink/index.js (Upstream + Null-Check + dieser Re-Assert).
+Note: the full patched file is versioned at
+deploy/beo-extensions/toslink/index.js (upstream + null check + this re-assert).
 
 --- a/beo-extensions/toslink/index.js
 +++ b/beo-extensions/toslink/index.js
@@ -23,8 +23,8 @@ deploy/beo-extensions/toslink/index.js (Upstream + Null-Check + dieser Re-Assert
  								//if (debug) console.log("Toslink activated.");
 -							}
 +							} else if (settings.toslinkEnabled && sources && sources.getCurrentSource && !sources.getCurrentSource()) {
-+								// Signal weiterhin vorhanden, aber keine Quelle aktiv (z. B. Spotify pausiert):
-+								// Optical erneut als aktive Quelle setzen.
++								// Signal still present but no source active (e.g. Spotify paused):
++								// re-assert Optical as the active source.
 +								toslinkActive = true;
 +								if (sources) sources.sourceActivated("toslink", "playing");
 +							}

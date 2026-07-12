@@ -1,15 +1,15 @@
-// Spotify-Connect-Quelle für Beocreate (go-librespot-basiert)
-// ------------------------------------------------------------
-// Minimaler Ersatz für die ursprüngliche HiFiBerryOS-„spotify"-Extension
-// (die audiocontrol2/librespot-Login voraussetzte). Diese Extension:
-//   - registriert „spotify" als Quelle (Zustand + Metadaten liefert der
-//     audiocontrol2-Shim auf :81, der go-librespot beobachtet),
-//   - bietet in den Quellen-Einstellungen einen An/Aus-Schalter, der den
-//     systemd-Dienst „go-librespot" startet bzw. stoppt.
+// Spotify Connect source for Beocreate (go-librespot based)
+// ----------------------------------------------------------
+// Minimal replacement for the original HiFiBerryOS "spotify" extension
+// (which required audiocontrol2/librespot login). This extension:
+//   - registers "spotify" as a source (state + metadata are provided by the
+//     audiocontrol2 shim on :81, which observes go-librespot),
+//   - offers an on/off switch in the source settings that starts/stops the
+//     systemd service "go-librespot".
 //
-// usesHifiberryControl:true => Transport aus dem UI läuft über den Shim an
-// go-librespot; zugleich pausiert die native stopOthers-Logik Spotify
-// automatisch, sobald TOSLINK aktiv wird.
+// usesHifiberryControl:true => transport from the UI runs via the shim to
+// go-librespot; at the same time the native stopOthers logic pauses Spotify
+// automatically as soon as TOSLINK becomes active.
 
 var exec = require("child_process").exec;
 var version = require("./package.json").version;
@@ -25,10 +25,10 @@ function serviceActive(callback) {
 }
 
 function setService(enable, callback) {
-	// enable/disable sorgt zusätzlich für die Persistenz über Neustarts.
+	// enable/disable also ensures persistence across reboots.
 	var cmd = enable ? ("systemctl enable --now " + SERVICE) : ("systemctl disable --now " + SERVICE);
 	exec(cmd, function(error) {
-		if (error && debug) console.error("Spotify: konnte " + SERVICE + " nicht " + (enable ? "starten" : "stoppen") + ": " + error);
+		if (error && debug) console.error("Spotify: could not " + (enable ? "start" : "stop") + " " + SERVICE + ": " + error);
 		serviceActive(callback);
 	});
 }
@@ -71,7 +71,7 @@ beo.bus.on('spotify', function(event) {
 				sources.setSourceOptions("spotify", {enabled: active});
 				if (!active) sources.sourceDeactivated("spotify", "stopped");
 			}
-			if (debug) console.log("Spotify (go-librespot) ist jetzt " + (active ? "an" : "aus") + ".");
+			if (debug) console.log("Spotify (go-librespot) is now " + (active ? "on" : "off") + ".");
 		});
 	}
 
@@ -79,6 +79,6 @@ beo.bus.on('spotify', function(event) {
 
 module.exports = {
 	version: version,
-	// Quelle ist „aktiviert", solange der go-librespot-Dienst läuft.
+	// The source is "enabled" as long as the go-librespot service is running.
 	isEnabled: function(callback) { serviceActive(function(active) { if (callback) callback(active); }); }
 };

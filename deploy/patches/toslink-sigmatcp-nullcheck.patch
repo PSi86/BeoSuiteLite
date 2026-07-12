@@ -1,10 +1,10 @@
-Toslink-Extension: getSigmaTCPSettings() liefert `undefined`, wenn
-/etc/sigmatcp.conf nicht existiert (readConfiguration in dsp-programs hat
-keinen expliziten Rückgabewert für den Datei-fehlt-Fall). Der Startup-Handler
-las darauf `.server` und warf eine uncaughtException. Solange die toslink-
-Extension gar nicht geladen wurde (fehlendes cardFeature "toslink"), fiel das
-nicht auf. Jetzt: defensiver Null-Check, damit der Startup-Listener-Lauf
-deterministisch durchläuft.
+Toslink extension: getSigmaTCPSettings() returns `undefined` when
+/etc/sigmatcp.conf does not exist (readConfiguration in dsp-programs has no
+explicit return value for the file-missing case). The startup handler then
+read `.server` on it and threw an uncaughtException. As long as the toslink
+extension was not loaded at all (missing cardFeature "toslink"), this went
+unnoticed. Now: a defensive null check so the startup listener run completes
+deterministically.
 
 --- a/beo-extensions/toslink/index.js
 +++ b/beo-extensions/toslink/index.js

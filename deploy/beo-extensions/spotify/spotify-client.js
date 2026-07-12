@@ -19,7 +19,7 @@ function toggleEnabled(enabled) {
 	if (enabled == undefined) {
 		enabled = (spotifyEnabled) ? false : true;
 	}
-	// Optimistische UI-Rückmeldung; der Server bestätigt anschließend den echten Dienststatus.
+	// Optimistic UI feedback; the server then confirms the real service state.
 	if (enabled) { $("#spotify-enabled-toggle").addClass("on"); } else { $("#spotify-enabled-toggle").removeClass("on"); }
 	beo.send({target: "spotify", header: "spotifyEnabled", content: {enabled: enabled}});
 }

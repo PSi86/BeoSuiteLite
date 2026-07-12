@@ -1,21 +1,21 @@
-# Ergänzung für /boot/firmware/cmdline.txt (ALLES bleibt EINE Zeile!)
+# Addition for /boot/firmware/cmdline.txt (EVERYTHING stays on ONE line!)
 #
-# Am Ende der bestehenden (einzigen) Zeile anhängen, durch Leerzeichen getrennt:
+# Append to the end of the existing (single) line, separated by a space:
 #
 #   spidev.bufsiz=131072
 #
-# Grund: Der spidev-Standardpuffer (4096 Byte) ist zu klein für große SPI-Reads
-# beim (Neu-)Programmieren des DSP (Programm ~4,5 KB am Stück). Für den laufenden
-# Betrieb (kleine Registerzugriffe) reicht 4096 — aber beim erneuten Flashen des
-# EEPROM (dsptoolkit install-profile, Jumper J1 gezogen) würde 4096 zu
-# abgeschnittenen Reads / „SPI returns zeros" führen.
+# Reason: The spidev default buffer (4096 bytes) is too small for large SPI reads
+# when (re-)programming the DSP (program ~4.5 KB in one go). For normal operation
+# (small register accesses) 4096 is fine — but when re-flashing the EEPROM
+# (dsptoolkit install-profile, jumper J1 removed) 4096 would lead to truncated
+# reads / "SPI returns zeros".
 #
-# WICHTIG: /etc/modprobe.d/spidev.conf (options spidev bufsiz=131072) greift hier
-# NICHT bei Boot, weil spidev sehr früh über das Device-Tree-Overlay gebunden wird.
-# Nur der Kernel-Cmdline-Parameter wirkt zuverlässig. Prüfen:
+# IMPORTANT: /etc/modprobe.d/spidev.conf (options spidev bufsiz=131072) does NOT
+# take effect at boot here, because spidev is bound very early via the device-tree
+# overlay. Only the kernel cmdline parameter works reliably. Verify with:
 #   cat /sys/module/spidev/parameters/bufsiz   # -> 131072
 #
-# Sicheres Anhängen (single-line-safe), mit Backup:
+# Safe append (single-line-safe), with a backup:
 #   sudo cp /boot/firmware/cmdline.txt /boot/firmware/cmdline.txt.bak
 #   grep -q spidev.bufsiz /boot/firmware/cmdline.txt || \
 #     sudo sed -i '1 s/$/ spidev.bufsiz=131072/' /boot/firmware/cmdline.txt

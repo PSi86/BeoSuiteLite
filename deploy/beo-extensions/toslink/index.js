@@ -248,8 +248,8 @@ var beoDSP = require('../../beocreate_essentials/dsp');
 									}
 									//if (debug) console.log("Toslink activated.");
 								} else if (settings.toslinkEnabled && sources && sources.getCurrentSource && !sources.getCurrentSource()) {
-									// Signal weiterhin vorhanden, aber keine Quelle aktiv (z. B. Spotify pausiert):
-									// Optical erneut als aktive Quelle setzen.
+									// Signal still present but no source active (e.g. Spotify paused):
+									// re-assert Optical as the active source.
 									toslinkActive = true;
 									if (sources) sources.sourceActivated("toslink", "playing");
 								}

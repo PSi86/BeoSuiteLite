@@ -1,11 +1,11 @@
 [Unit]
-Description=AudioControl2-Shim für Beocreate 2 (Quellen-/Now-Playing-/Volume-API auf :81)
+Description=AudioControl2 shim for Beocreate 2 (sources/now-playing/volume API on :81)
 After=network.target sigmatcpserver.service
 Wants=sigmatcpserver.service
 
 [Service]
 Type=simple
-# amixer (DSPVolume) benötigt Zugriff auf die Soundkarte – root wie beocreate2/sigmatcpserver.
+# amixer (DSPVolume) needs access to the sound card - root like beocreate2/sigmatcpserver.
 User=root
 ExecStart=/usr/bin/node /opt/beocreate/audiocontrol-shim/shim.js
 Restart=on-failure

@@ -1,34 +1,35 @@
 #!/usr/bin/env node
 "use strict";
 
-// AudioControl2-Shim für Beocreate 2  (+ go-librespot/Spotify-Integration)
-// -----------------------------------------------------------------------
-// Beocreate 2 wurde für HiFiBerryOS geschrieben und erwartet dort den
-// "audiocontrol2"-Daemon unter http://127.0.1.1:81. Dieser Shim liefert die
-// von den Extensions "sources"/"sound" benötigte REST-Teilmesse — schlank,
-// ohne npm-Abhängigkeiten (nur Node-Builtins) — und übernimmt zusätzlich die
-// Spotify-Integration über go-librespot.
+// AudioControl2 shim for Beocreate 2  (+ go-librespot/Spotify integration)
+// ------------------------------------------------------------------------
+// Beocreate 2 was written for HiFiBerryOS and expects its "audiocontrol2"
+// daemon at http://127.0.1.1:81. This shim provides the REST subset that the
+// "sources"/"sound" extensions require — lean, with no npm dependencies (Node
+// built-ins only) — and additionally handles the Spotify integration via
+// go-librespot.
 //
-// audiocontrol2-REST (von Beocreate genutzt):
+// audiocontrol2 REST (used by Beocreate):
 //   - GET  /api/player/status    -> { players: [...], last_updated }
-//   - GET  /api/track/metadata   -> Metadaten der aktiven Quelle (oder {})
-//   - GET  /api/volume           -> { percent }   (live aus ALSA "DSPVolume")
-//   - POST /api/player/<cmd>      -> Transport (play/pause/playpause/stop/next/previous)
+//   - GET  /api/track/metadata   -> metadata of the active source (or {})
+//   - GET  /api/volume           -> { percent }   (live from ALSA "DSPVolume")
+//   - POST /api/player/<cmd>      -> transport (play/pause/playpause/stop/next/previous)
 //   - POST /api/player/activate/<name> · /api/track/love|unlove
 //
 // Spotify (go-librespot):
-//   - Der Shim POLLT go-librespot (GET :3678/status) und leitet Zustand +
-//     Metadaten als audiocontrol2-Push an Beocreate weiter
+//   - The shim POLLS go-librespot (GET :3678/status) and forwards state +
+//     metadata as an audiocontrol2 push to Beocreate
 //     (POST :80/sources/metadata -> processAudioControlMetadata).
-//   - Transportbefehle aus dem Beocreate-UI kommen als POST /api/player/<cmd>
-//     hier an und werden an go-librespot (:3678/player/<cmd>) weitergereicht.
-//   - Die zugehörige Quelle wird von der Beocreate-"spotify"-Extension
-//     registriert (usesHifiberryControl:true). Dadurch pausiert die native
-//     stopOthers-Logik Spotify automatisch, sobald TOSLINK aktiv wird.
+//   - Transport commands from the Beocreate UI arrive here as
+//     POST /api/player/<cmd> and are forwarded to go-librespot
+//     (:3678/player/<cmd>).
+//   - The corresponding source is registered by the Beocreate "spotify"
+//     extension (usesHifiberryControl:true). This lets the native stopOthers
+//     logic pause Spotify automatically as soon as TOSLINK becomes active.
 //
-// LAUTSTÄRKE: go-librespots eigene (digitale) Lautstärke wird NICHT an
-// Beocreate gemeldet. Der DSP-Master (DSPVolume/Reg 106) bleibt der alleinige
-// Lautstärke-Regler — /api/volume liefert stets den DSPVolume-Wert.
+// VOLUME: go-librespot's own (digital) volume is NOT reported to Beocreate.
+// The DSP master (DSPVolume/reg 106) remains the sole volume control —
+// /api/volume always returns the DSPVolume value.
 
 const http = require("http");
 const { execFile } = require("child_process");
@@ -37,17 +38,17 @@ const PORT = 81;
 const HOST = "0.0.0.0";
 const ALSA_MIXER = "DSPVolume";
 const GLR_API = "http://127.0.0.1:3678";  // go-librespot API
-const BEO_API = "http://127.0.0.1:80";    // Beocreate-Server (Bus-Push)
+const BEO_API = "http://127.0.0.1:80";    // Beocreate server (bus push)
 const SPOTIFY_POLL_MS = 1000;
-const SPOTIFY_REPUSH_MS = 10000;          // periodisch neu pushen (überlebt Beocreate-Neustart)
+const SPOTIFY_REPUSH_MS = 10000;          // periodic re-push (survives a Beocreate restart)
 const DEBUG = process.env.SHIM_DEBUG === "1";
 
 // ---------------------------------------------------------------------------
-// Zustand
+// State
 // ---------------------------------------------------------------------------
 
-const players = {};        // name(kleingeschrieben) -> audiocontrol2-Player-Objekt
-let currentMetadata = {};  // Now-Playing im audiocontrol2-Format
+const players = {};        // name(lowercased) -> audiocontrol2 player object
+let currentMetadata = {};  // now-playing in audiocontrol2 format
 let lastUpdated = Date.now();
 
 function touch() { lastUpdated = Date.now(); }
@@ -55,7 +56,7 @@ function touch() { lastUpdated = Date.now(); }
 function log(/* ...args */) { if (DEBUG) console.error.apply(console, ["[shim]"].concat([].slice.call(arguments))); }
 
 // ---------------------------------------------------------------------------
-// HTTP-Helfer
+// HTTP helpers
 // ---------------------------------------------------------------------------
 
 function sendJSON(res, status, obj) {
@@ -83,7 +84,7 @@ function readBody(req, callback) {
 	req.on("error", () => callback(null));
 }
 
-// Ausgehende JSON-Anfrage (an go-librespot / Beocreate). Robust, ohne Crash.
+// Outbound JSON request (to go-librespot / Beocreate). Robust, never crashes.
 function httpJSON(method, url, body, callback) {
 	let done = false;
 	const finish = (err, code, parsed) => { if (!done) { done = true; if (callback) callback(err, code, parsed); } };
@@ -114,7 +115,7 @@ function httpJSON(method, url, body, callback) {
 	} catch (e) { finish(e); }
 }
 
-// Liest die Lautstärke live aus dem ALSA-Control "DSPVolume".
+// Reads the current volume live from the ALSA "DSPVolume" control.
 function getVolumePercent(callback) {
 	execFile("amixer", ["get", ALSA_MIXER], { timeout: 4000 }, (error, stdout) => {
 		if (error || !stdout) return callback(null);
@@ -127,7 +128,7 @@ function getVolumePercent(callback) {
 // go-librespot / Spotify
 // ---------------------------------------------------------------------------
 
-// audiocontrol2-Transportbefehl -> go-librespot-Endpunkt.
+// audiocontrol2 transport command -> go-librespot endpoint.
 const TRANSPORT_MAP = { play: "resume", pause: "pause", playpause: "playpause", stop: "pause", next: "next", previous: "prev" };
 
 let spotifyLastKey = null;
@@ -143,14 +144,14 @@ function deriveSpotifyState(s) {
 function pushMetadataToBeocreate(meta) {
 	spotifyLastPush = Date.now();
 	httpJSON("POST", BEO_API + "/sources/metadata", meta, (err) => {
-		if (err) log("Push an Beocreate fehlgeschlagen:", err.message);
+		if (err) log("push to Beocreate failed:", err.message);
 	});
 }
 
 function pollSpotify() {
 	httpJSON("GET", GLR_API + "/status", null, (err, code, status) => {
 		if (err || code !== 200 || !status) {
-			// go-librespot nicht erreichbar / keine Session: ggf. auf "stopped" zurücksetzen.
+			// go-librespot unreachable / no session: fall back to "stopped" if needed.
 			if (spotifyLastState !== "stopped") {
 				spotifyLastState = "stopped"; spotifyLastKey = "stopped||";
 				delete players["spotify"]; touch();
@@ -195,7 +196,7 @@ function pollSpotify() {
 				title: meta.title,
 				artist: meta.artist
 			};
-			currentMetadata = meta; // /api/track/metadata konsistent halten
+			currentMetadata = meta; // keep /api/track/metadata consistent
 			touch();
 		}
 		if (changed || stale) {
@@ -205,19 +206,19 @@ function pollSpotify() {
 	});
 }
 
-// Transportbefehl an go-librespot weiterreichen.
+// Forward a transport command to go-librespot.
 function forwardTransport(command, callback) {
 	const glrCmd = TRANSPORT_MAP[command];
 	if (!glrCmd) return callback(false);
 	httpJSON("POST", GLR_API + "/player/" + glrCmd, null, (err, code) => {
-		if (err) { log("Transport an go-librespot fehlgeschlagen:", err.message); return callback(false); }
-		setTimeout(pollSpotify, 250); // Zustand zügig nachziehen
+		if (err) { log("transport to go-librespot failed:", err.message); return callback(false); }
+		setTimeout(pollSpotify, 250); // reflect the new state quickly
 		callback(code >= 200 && code < 300);
 	});
 }
 
 // ---------------------------------------------------------------------------
-// Interne Player-Verwaltung (alternative Naht, z. B. für weitere Quellen)
+// Internal player registry (alternative hook, e.g. for further sources)
 // ---------------------------------------------------------------------------
 
 function upsertPlayer(p) {
@@ -292,17 +293,17 @@ function handle(req, res) {
 
 const server = http.createServer((req, res) => {
 	try { handle(req, res); }
-	catch (e) { try { sendJSON(res, 500, { error: String(e && e.message || e) }); } catch (_) {} console.error("[shim] Fehler bei", req.method, req.url, "-", e && e.message); }
+	catch (e) { try { sendJSON(res, 500, { error: String(e && e.message || e) }); } catch (_) {} console.error("[shim] error at", req.method, req.url, "-", e && e.message); }
 });
 
 server.on("error", (e) => {
-	console.error("[shim] Serverfehler:", e && e.message);
-	if (e && e.code === "EADDRINUSE") { console.error("[shim] Port " + PORT + " belegt – läuft evtl. noch audiocontrol2?"); process.exit(1); }
+	console.error("[shim] server error:", e && e.message);
+	if (e && e.code === "EADDRINUSE") { console.error("[shim] port " + PORT + " in use - is audiocontrol2 still running?"); process.exit(1); }
 });
 
 server.listen(PORT, HOST, () => {
-	console.log("[shim] AudioControl2-Shim lauscht auf http://" + HOST + ":" + PORT);
-	setInterval(pollSpotify, SPOTIFY_POLL_MS);  // Spotify-Zustand pollen
+	console.log("[shim] AudioControl2 shim listening on http://" + HOST + ":" + PORT);
+	setInterval(pollSpotify, SPOTIFY_POLL_MS);  // poll the Spotify state
 });
 
 process.on("SIGTERM", () => server.close(() => process.exit(0)));

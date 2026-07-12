@@ -1,11 +1,11 @@
 [Unit]
-Description=go-librespot (Spotify Connect) für Beocreate
+Description=go-librespot (Spotify Connect) for Beocreate
 After=network-online.target sound.target sigmatcpserver.service
 Wants=network-online.target
 
 [Service]
 Type=simple
-# Nicht als root: pi ist in der Gruppe audio und hat damit Zugriff auf die Soundkarte.
+# Not as root: user pi is in the audio group and thus has access to the sound card.
 User=pi
 ExecStart=/opt/go-librespot/go-librespot --config_dir /home/pi/.config/go-librespot
 Restart=on-failure

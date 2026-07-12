@@ -3,7 +3,7 @@
   "version": "0.7.0-glr",
   "description": "Spotify Connect source for Beocreate (go-librespot based)",
   "main": "index.js",
-  "author": "Bang & Olufsen (original), angepasst für go-librespot",
+  "author": "Bang & Olufsen (original), adapted for go-librespot",
   "license": "MIT",
   "beocreate": {}
 }
