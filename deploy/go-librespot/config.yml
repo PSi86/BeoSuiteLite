@@ -1,0 +1,33 @@
+# go-librespot (Spotify Connect) für Beocreate
+# Ablage auf dem Pi: /home/pi/.config/go-librespot/config.yml (Eigentümer pi)
+#
+# LAUTSTÄRKE-SICHERHEIT: Die eigentliche (analoge) Lautstärke regelt ausschließlich
+# der DSP-Master (ALSA "DSPVolume" / DSP-Register 106) über die Beocreate-UI.
+# go-librespots eigene Lautstärke ist NUR eine zusätzliche digitale Absenkung
+# (external_volume/mixer bewusst NICHT genutzt), damit ein per Spotify verbundenes
+# Handy NIE die Hardware-Lautstärke hochreißen kann. ignore_last_volume=true +
+# niedriges initial_volume => jede neue Verbindung startet leise.
+
+device_name: Beocreate
+device_type: speaker
+
+audio_backend: alsa
+# plughw wandelt Spotifys 44,1 kHz automatisch auf die Geräte-/DSP-Rate (48 kHz).
+audio_device: plughw:CARD=sndrpihifiberry
+
+bitrate: 320            # 320 kbit/s (nur mit Spotify Premium; sonst Fallback)
+volume_steps: 100
+initial_volume: 40      # digitale Startlautstärke (zusätzlich zum DSP-Master)
+ignore_last_volume: true
+external_volume: false  # keine Mixer-Kopplung -> DSP-Master bleibt alleiniger Regler
+
+zeroconf_enabled: true  # dauerhaft im Spotify-„Connect" auffindbar
+# Über den laufenden avahi-daemon registrieren (statt eigenem mDNS-Responder) —
+# vermeidet den 5353-Konflikt mit avahi/beocreate-dnssd2. So wird das Gerät
+# tatsächlich in der Spotify-App sichtbar.
+zeroconf_backend: avahi
+
+server:                 # lokale Steuer-/Event-API für die Bridge (-> Shim :81)
+  enabled: true
+  address: localhost
+  port: 3678
