@@ -1,0 +1,11 @@
+--- /opt/beocreate/beo-extensions/sound/index.js.orig	2026-07-12 18:24:30.203506349 +0200
++++ /opt/beocreate/beo-extensions/sound/index.js	2026-07-12 18:24:30.311517051 +0200
+@@ -376,7 +376,7 @@
+ 					callback(null);
+ 					if (debug) console.error("Could not retrieve volume: " + res.status, res.statusText);
+ 				}
+-			});
++			}).catch(function(){ if(callback) callback(null); });
+ 		}
+ 	}
+ 	

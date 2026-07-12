@@ -1,0 +1,8 @@
+{
+  "cardType": "Beocreate 4-Channel Amplifier",
+  "cardFeatures": ["dsp"],
+  "port": 80,
+  "language": "en",
+  "defaultAppearance": "default",
+  "enabledExtensions": ["dsp-programs","equaliser","channels","toslink","sources","sound","beosonic","speaker-preset","room-compensation","product-information","now-playing","ui-settings","general-settings","setup","volume-limit"]
+}

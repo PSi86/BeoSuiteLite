@@ -1,0 +1,14 @@
+[Unit]
+Description=Beocreate 2
+After=network-online.target sigmatcpserver.service
+Wants=network-online.target
+Requires=sigmatcpserver.service
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/beocreate/beo-system
+ExecStart=/usr/bin/node --require /opt/beocreate/beo-guard.js /opt/beocreate/beo-system/beo-server.js vv
+Restart=on-failure
+RestartSec=3
+[Install]
+WantedBy=multi-user.target

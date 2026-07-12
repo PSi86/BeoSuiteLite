@@ -1,0 +1,8 @@
+#dtparam=i2c_arm=on
+#dtparam=i2s=on
+#dtparam=spi=on
+dtparam=audio=off
+dtoverlay=hifiberry-dac
+dtparam=i2s=on
+dtparam=spi=on
+dtparam=i2c_arm=on
