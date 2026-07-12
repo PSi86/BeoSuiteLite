@@ -36,13 +36,23 @@ Then the guided hardware steps:
 ```bash
 sudo reboot                  # 1) apply the SPI/I2S overlay + spidev.bufsiz
 
-# 2) flash the DSP program (power off → REMOVE jumper J1 → power on):
-sudo ./install.sh flash-dsp
-#    then: power off → RE‑INSERT J1 → power on (DSP now self‑boots)
+sudo ./install.sh check-dsp  # 2) is a valid program already in the EEPROM?
 
-# 3) set + persist a safe starting volume (DSP running):
-sudo ./install.sh safe-volume
+# 3) ONLY if check-dsp reports "NO valid program" (fresh board / empty EEPROM):
+#    the board is DEADLOCKED while J1 is fitted, so flash with J1 OUT:
+#      power off → REMOVE jumper J1 → power on
+sudo ./install.sh flash-dsp  #    flashes AND verifies the checksum
+#      power off → RE‑INSERT J1 → power on (DSP now self‑boots)
+
+sudo ./install.sh safe-volume # 4) set + persist a safe starting volume
 ```
+
+> **Empty‑EEPROM deadlock (the project's #1 finding):** on a fresh board, self‑boot
+> jumper **J1 fitted + an empty EEPROM** means the DSP core never starts, so it
+> **cannot be programmed** in that state (`check-dsp` reports it; `flash-dsp` refuses
+> and tells you to pull J1). The DSP self‑boots from its own EEPROM, so once flashed
+> it works independently of the Pi. Until then the UI comes up but has **no DSP
+> features / no sound** — run `check-dsp` to diagnose.
 
 Open `http://<pi-ip>/` for the web UI, and select **“Beocreate”** in the Spotify
 app (Premium required for playback).

@@ -29,6 +29,8 @@ REPO="$(cd "$(dirname "$0")" && pwd)"
 GLR_VERSION="v0.7.4"
 DSP_PROFILE="beocreate-universal-11.xml"
 SAFE_VOLUME_PCT="40"
+DSP_CHECKSUM_EXPECTED="97C9C5A88582888D111259BF70D6D79E"
+DSP_REST="http://127.0.0.1:13141"   # sigmatcpserver --enable-rest
 
 # --- helpers ---------------------------------------------------------------
 log()  { printf '\n\033[1;36m==> %s\033[0m\n' "$*"; }
@@ -41,6 +43,13 @@ need_root() { [ "$(id -u)" -eq 0 ] || die "Please run with sudo (as root)."; }
 append_line_once() { # append_line_once <line> <file>
 	local line="$1" file="$2"
 	grep -qxF -- "$line" "$file" 2>/dev/null || printf '%s\n' "$line" >> "$file"
+}
+
+# Reads the DSP program checksum via the sigmatcpserver REST API.
+# Echoes the checksum (uppercase hex) or nothing if it can't be read.
+dsp_checksum() {
+	curl -s -m5 "$DSP_REST/checksum" 2>/dev/null \
+		| grep -oE '"checksum":"[0-9A-Fa-f]+"' | head -1 | sed 's/.*:"//; s/"//'
 }
 
 # Target user for go-librespot (the non-root user that ran sudo; falls back to pi).
@@ -180,16 +189,63 @@ phase_shim() {
 	systemctl enable audiocontrol-shim.service
 }
 
+# --- sub-command: report the DSP state (handles the empty-EEPROM deadlock) --
+cmd_check_dsp() {
+	need_root
+	local cs; cs="$(dsp_checksum)"
+	if [ "$cs" = "$DSP_CHECKSUM_EXPECTED" ]; then
+		log "DSP OK — program present in EEPROM (checksum $cs). Self-boot is working."
+		return 0
+	elif [ -z "$cs" ]; then
+		warn "Could not read the DSP checksum."
+		info "Is sigmatcpserver running and was the SPI/I2S reboot done?"
+		info "  sudo systemctl start sigmatcpserver   # then re-run: sudo ./install.sh check-dsp"
+		return 2
+	else
+		warn "DSP has NO valid program (checksum: $cs)."
+		cat <<'EOF'
+    This is the empty-EEPROM / "SPI returns zeros" state.
+
+    IMPORTANT — the deadlock: on a fresh board, self-boot jumper J1 fitted +
+    an empty EEPROM means the DSP core never starts, so it CANNOT be programmed
+    while J1 is in place. To flash the program:
+
+        power off  ->  REMOVE jumper J1  ->  power on
+        sudo ./install.sh flash-dsp
+        power off  ->  RE-INSERT jumper J1  ->  power on   (DSP now self-boots)
+        sudo ./install.sh safe-volume
+EOF
+		return 1
+	fi
+}
+
 # --- sub-command: flash the DSP profile (run with J1 REMOVED) ---------------
 cmd_flash_dsp() {
 	need_root
 	command -v dsptoolkit >/dev/null || die "dsptoolkit not found — run the base install first."
-	warn "This flashes the DSP EEPROM. The self-boot jumper J1 MUST be REMOVED right now."
+
+	# If it's already programmed and self-booting, nothing to do.
+	if [ "$(dsp_checksum)" = "$DSP_CHECKSUM_EXPECTED" ]; then
+		log "DSP already holds the correct program (checksum matches). Nothing to flash."
+		return 0
+	fi
+
+	warn "Flashing the DSP EEPROM. The self-boot jumper J1 MUST be REMOVED right now,"
+	warn "otherwise a fresh board deadlocks (empty EEPROM + J1 = DSP core never starts)."
 	info "Profile: /root/$DSP_PROFILE"
-	dsptoolkit install-profile "/root/$DSP_PROFILE"
-	info "Checksum after flashing (expect 97C9C5A88582888D111259BF70D6D79E):"
-	dsptoolkit get-checksum || true
-	log "DSP flashed. Now: power off, RE-INSERT J1, power on, then run: sudo ./install.sh safe-volume"
+	dsptoolkit install-profile "/root/$DSP_PROFILE" || true
+	sleep 2
+
+	local cs; cs="$(dsp_checksum)"
+	if [ "$cs" = "$DSP_CHECKSUM_EXPECTED" ]; then
+		log "DSP flashed and VERIFIED (checksum $cs)."
+		info "Now: power off, RE-INSERT J1, power on, then run: sudo ./install.sh safe-volume"
+	else
+		die "Flash did not verify (checksum: '${cs:-unreadable}').
+    The most likely cause: jumper J1 is still fitted. A fresh board with J1 set +
+    empty EEPROM is DEADLOCKED and cannot be programmed. REMOVE J1 and run again:
+        sudo ./install.sh flash-dsp"
+	fi
 }
 
 # --- sub-command: set a safe low volume and persist it ----------------------
@@ -222,12 +278,16 @@ MANUAL NEXT STEPS (hardware — cannot be automated):
   1) REBOOT so the SPI/I2S overlay and spidev.bufsiz take effect:
          sudo reboot
 
-  2) Flash the DSP program to the board EEPROM:
+  2) Check the DSP state (does the EEPROM already hold a program?):
+         sudo ./install.sh check-dsp
+
+  3) If it reports NO valid program (fresh board / "SPI returns zeros"):
+     the board is deadlocked while jumper J1 is fitted, so flash it with J1 OUT:
          - Power off, REMOVE the self-boot jumper J1, power on.
-         - Run:   sudo ./install.sh flash-dsp
+         - Run:   sudo ./install.sh flash-dsp     # flashes AND verifies
          - Power off, RE-INSERT J1, power on (DSP now self-boots).
 
-  3) Set a safe starting volume (with the DSP running):
+  4) Set a safe starting volume (with the DSP running):
          sudo ./install.sh safe-volume
 
   Then open the web UI at  http://<pi-ip>/  and select "Beocreate" in the
@@ -242,7 +302,8 @@ EOF
 # --- dispatch ---------------------------------------------------------------
 case "${1:-install}" in
 	install)      cmd_install ;;
+	check-dsp)    cmd_check_dsp ;;
 	flash-dsp)    cmd_flash_dsp ;;
 	safe-volume)  shift || true; cmd_safe_volume "${1:-}" ;;
-	*)            die "Unknown command '$1' (use: install | flash-dsp | safe-volume)";;
+	*)            die "Unknown command '$1' (use: install | check-dsp | flash-dsp | safe-volume)";;
 esac
