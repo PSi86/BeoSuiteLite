@@ -7,13 +7,19 @@
 
 	<div class="scroll-area">
 		<div class="menu-content">
+			<div class="menu-item toggle" id="spotify-enabled-toggle" onclick="spotify.toggleEnabled();">
+				<div class="menu-label">On</div>
+				<div class="menu-toggle"></div>
+			</div>
 			<div class="menu-item source-alias-control" id="spotify-alias-item" onclick="sources.setAlias('spotify');">
 				<div class="menu-label">Alias</div>
 				<div class="menu-value button">Set...</div>
 			</div>
 			<p class="margin-top">Streame Musik über Spotify Connect: Wähle in der Spotify-App „Beocreate" als Wiedergabegerät. Eine Spotify-Premium-Mitgliedschaft ist erforderlich.</p>
-			<p>Bereitgestellt über das Open-Source-Projekt go-librespot. Die Konfiguration (Gerätename, Audio-Ausgang) erfolgt in <code>~/.config/go-librespot/config.yml</code> auf dem Gerät.</p>
+			<p>Der Schalter startet bzw. stoppt den go-librespot-Dienst. Ist er aus, verschwindet „Beocreate" aus der Spotify-App. Weitere Einstellungen (Gerätename, Audio-Ausgang) in <code>~/.config/go-librespot/config.yml</code>.</p>
 		</div>
 	</div>
 
 </div>
+
+<script type="text/javascript" charset="utf-8" src="€/spotify-client.js"></script>
