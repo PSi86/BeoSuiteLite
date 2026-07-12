@@ -1,0 +1,16 @@
+[Unit]
+Description=BeoSuiteLite DSP watchdog (runtime self-healing)
+After=sigmatcpserver.service beocreate2.service
+Wants=sigmatcpserver.service
+
+[Service]
+Type=simple
+User=root
+EnvironmentFile=-/etc/default/dsp-watchdog
+ExecStart=/opt/beocreate/dsp-watchdog/dsp-watchdog.sh
+# Backstop only — the script is designed never to exit on its own.
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

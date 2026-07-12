@@ -120,6 +120,7 @@ The DSP program (`beocreate-universal-11.xml`) resides **in the board's EEPROM**
 | `systemd/sigmatcpserver.service.d/override.conf` | `/etc/systemd/system/sigmatcpserver.service.d/` | Flags override (8086 + DSPVolume) |
 | `audiocontrol-shim/shim.js` | `/opt/beocreate/audiocontrol-shim/` | audiocontrol2 replacement on `:81` + go‑librespot integration (poll/push/transport) |
 | `audiocontrol-shim/audiocontrol-shim.service` | `/etc/systemd/system/` | systemd unit for the shim (as root, `enable`d) |
+| `dsp-watchdog/dsp-watchdog.sh` + `.service` | `/opt/beocreate/dsp-watchdog/` + `/etc/systemd/system/` | runtime self‑healing watchdog (heal → reboot → degraded) |
 | `go-librespot/config.yml` | `~pi/.config/go-librespot/` | Spotify Connect config (avahi, plughw, API :3678, safe volume) |
 | `go-librespot/go-librespot.service` | `/etc/systemd/system/` | Service (user `pi`, `enable`d); binary `v0.7.4` arm64 to `/opt/go-librespot/` |
 | `beo-extensions/spotify/` | `/opt/beocreate/beo-extensions/spotify/` | minimal Spotify source extension (tile/icon/on‑off switch); replaces the original (backup: `~pi/beo-extension-spotify-orig`) |
@@ -142,8 +143,27 @@ Beocreate 2 itself is deployed from `github.com/bang-olufsen/create` to `/opt/be
 **Working (verified after reboot):** DSP self‑boots · TOSLINK/PC audible, stereo correct · Beocreate 2 UI on `:80` (EQ, channels, Optical, Beosonic, presets) · **master volume control** · **audiocontrol2 shim on `:81`** · **sources list shows "Optical Input" + "Spotify Connect"** (each with icon, correct active indication/switching) · **Spotify Connect** fully: device "Beocreate" in the app, Now‑Playing (title/artist/album/cover), transport (play/pause/skip), on/off switch, automatic TOSLINK priority · **reboot‑proof** (all services `enable`d, safe boot volume, `spidev.bufsiz=131072` takes effect).
 
 **Open:**
-- **Power‑cycle test** (power off/on) as final assurance — reboot is already OK.
 - Nice‑to‑have: seek (jumping within a track) for Spotify is not wired up yet.
+
+## Runtime resilience (self‑healing)
+
+A **DSP watchdog** (`dsp-watchdog.service`) monitors the DSP subsystem every 30 s and
+recovers from faults automatically, logging every step (`journalctl -u dsp-watchdog`):
+
+- **Health check:** `sigmatcpserver` active · DSP answers over REST with the expected
+  program **checksum** · the `DSPVolume` ALSA control exists · the Beocreate 2 UI serves on `:80`.
+- **Escalation:** unhealthy → **restart `sigmatcpserver` + `beocreate2`** (a `sigmatcpserver`
+  restart tears `beocreate2` down via `Requires=`, so both are brought back) → after
+  repeated failures, **reboot the Pi** (last resort, to re‑trigger DSP self‑boot),
+  **rate‑limited** (≥ 30 min between reboots) to avoid a boot loop → if still broken
+  (e.g. **empty EEPROM** that needs a manual re‑flash), enter a **degraded** mode that
+  keeps monitoring and logs loudly instead of looping, and auto‑reports `RECOVERED` once fixed.
+- Tunable via `/etc/default/dsp-watchdog` (intervals, `REBOOT_ENABLED=0` to disable reboots, etc.).
+- (Service crashes are already handled by systemd `Restart=on-failure`; the watchdog adds
+  detection of *hangs* and *DSP‑state* faults that systemd cannot see.)
+
+Verified on device: stopping `sigmatcpserver` → watchdog logs `UNHEALTHY → HEAL → RECOVERED`
+and both services come back.
 
 ## ⚠️ Volume safety
 
