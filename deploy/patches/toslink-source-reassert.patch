@@ -1,0 +1,31 @@
+Toslink-Extension: Quellen-Re-Assert bei anhaltendem Signal.
+
+Problem: Die toslink-Aktivierung ist EDGE-basiert (nur bei Signalwechsel
+kein-Signal -> Signal). Läuft parallel eine Spotify-Wiedergabe und wird sie
+pausiert, setzt Beocreates determineCurrentSource currentSource=null (es fällt
+nicht auf die tiefer priorisierte, aber noch aktive Optical-Quelle zurück).
+Da das optische Signal durchgehend anliegt, gibt es keine Signalflanke — Optical
+wird nie erneut aktiviert und Now-Playing bleibt leer, obwohl der TOSLINK-Ton
+sofort wieder hörbar ist.
+
+Fix: Beim Polling zusätzlich re-aktivieren, wenn Signal anliegt UND keine Quelle
+aktiv ist (sources.getCurrentSource() == null). Stiehlt Spotify NICHT den Fokus,
+solange Spotify aktiv ist (dann ist getCurrentSource() != null).
+
+Hinweis: Die vollständige gepatchte Datei liegt versioniert unter
+deploy/beo-extensions/toslink/index.js (Upstream + Null-Check + dieser Re-Assert).
+
+--- a/beo-extensions/toslink/index.js
++++ b/beo-extensions/toslink/index.js
+@@ -247,6 +247,12 @@
+ 									if (sources) sources.sourceActivated("toslink", "playing");
+ 								}
+ 								//if (debug) console.log("Toslink activated.");
+-							}
++							} else if (settings.toslinkEnabled && sources && sources.getCurrentSource && !sources.getCurrentSource()) {
++								// Signal weiterhin vorhanden, aber keine Quelle aktiv (z. B. Spotify pausiert):
++								// Optical erneut als aktive Quelle setzen.
++								toslinkActive = true;
++								if (sources) sources.sourceActivated("toslink", "playing");
++							}
+ 						} else if (response.dec == 0) {
