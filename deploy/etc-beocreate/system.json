@@ -4,5 +4,5 @@
   "port": 80,
   "language": "en",
   "defaultAppearance": "default",
-  "enabledExtensions": ["dsp-programs","equaliser","channels","toslink","sources","sound","beosonic","speaker-preset","room-compensation","product-information","now-playing","ui-settings","general-settings","setup","volume-limit"]
+  "enabledExtensions": ["dsp-programs","equaliser","channels","toslink","sources","sound","beosonic","speaker-preset","room-compensation","product-information","now-playing","ui-settings","general-settings","setup","volume-limit","spotify"]
 }
