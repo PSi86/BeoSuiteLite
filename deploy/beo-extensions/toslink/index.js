@@ -247,11 +247,31 @@ var beoDSP = require('../../beocreate_essentials/dsp');
 										if (sources) sources.sourceActivated("toslink", "playing");
 									}
 									//if (debug) console.log("Toslink activated.");
-								} else if (settings.toslinkEnabled && sources && sources.getCurrentSource && !sources.getCurrentSource()) {
-									// Signal still present but no source active (e.g. Spotify paused):
-									// re-assert Optical as the active source.
-									toslinkActive = true;
-									if (sources) sources.sourceActivated("toslink", "playing");
+								} else if (settings.toslinkEnabled && sources && sources.getCurrentSource) {
+									// Signal still present. Ensure Optical is the Now-Playing (focused) source
+									// whenever it is the audible (current) one - including after a paused Spotify,
+									// which keeps focus while paused and would otherwise remain in Now-Playing.
+									var current = sources.getCurrentSource();
+									var currentName = current ? current.currentSource : null;
+									var reassert = false;
+									if (!currentName) {
+										// Nothing is active -> re-assert Optical.
+										reassert = true;
+									} else if (currentName == "toslink") {
+										// Optical is audible; make sure it is also focused (only if not already,
+										// to avoid emitting UI updates on every poll).
+										var all = (sources.getSources) ? sources.getSources() : {};
+										var focused = null, maxFocusIndex = 0;
+										for (var src in all) {
+											if (all[src] && all[src].focusIndex > maxFocusIndex) { maxFocusIndex = all[src].focusIndex; focused = src; }
+										}
+										if (focused != "toslink") reassert = true;
+									}
+									// If another source is current (e.g. Spotify playing), do NOT steal focus.
+									if (reassert) {
+										toslinkActive = true;
+										sources.sourceActivated("toslink", "playing");
+									}
 								}
 							} else if (response.dec == 0) {
 								if (toslinkSignal == true) {
