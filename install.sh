@@ -178,15 +178,21 @@ phase_go_librespot() {
 	systemctl enable go-librespot.service
 }
 
-# --- phase 4: audiocontrol2 shim -------------------------------------------
+# --- phase 4: audiocontrol2 shim + DSP watchdog ----------------------------
 phase_shim() {
-	log "Phase 4/5 — audiocontrol2 shim (:81)"
+	log "Phase 4/5 — audiocontrol2 shim (:81) + DSP watchdog"
 	install -d /opt/beocreate/audiocontrol-shim
 	install -m0644 "$REPO/deploy/audiocontrol-shim/shim.js" /opt/beocreate/audiocontrol-shim/shim.js
 	install -m0644 "$REPO/deploy/audiocontrol-shim/audiocontrol-shim.service" \
 		/etc/systemd/system/audiocontrol-shim.service
+
+	info "DSP watchdog (runtime self-healing: heal -> reboot -> degraded, all logged)"
+	install -d /opt/beocreate/dsp-watchdog
+	install -m0755 "$REPO/deploy/dsp-watchdog/dsp-watchdog.sh" /opt/beocreate/dsp-watchdog/dsp-watchdog.sh
+	install -m0644 "$REPO/deploy/dsp-watchdog/dsp-watchdog.service" /etc/systemd/system/dsp-watchdog.service
+
 	systemctl daemon-reload
-	systemctl enable audiocontrol-shim.service
+	systemctl enable audiocontrol-shim.service dsp-watchdog.service
 }
 
 # --- sub-command: report the DSP state (handles the empty-EEPROM deadlock) --
@@ -271,7 +277,9 @@ cmd_install() {
 
 $(printf '\033[1;32m')Base software install complete.$(printf '\033[0m')
 
-Services enabled: sigmatcpserver, beocreate2, audiocontrol-shim, go-librespot.
+Services enabled: sigmatcpserver, beocreate2, audiocontrol-shim, go-librespot,
+dsp-watchdog (runtime self-healing for the DSP: restarts services, and as a
+last resort reboots the Pi — rate-limited; watch it with 'journalctl -u dsp-watchdog').
 
 MANUAL NEXT STEPS (hardware — cannot be automated):
 
