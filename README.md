@@ -11,6 +11,56 @@ A clean rebuild to make the **HiFiBerry Beocreate 4‑Channel Amplifier** (Analo
 - **Jumper:** J1 **self‑boot = set** (DSP boots its program from EEPROM). J5 **Output Voltage Limiter = set** (protection). ⚠️ To *program* the DSP, J1 must be **removed** (see below).
 - Speakers on the **60 W channels CH16 (left) / CH17 (right)** → in the DSP profile `channelSelect` 0/1 = L/R, correct.
 
+## Installation
+
+An installer (`install.sh`) automates the **software** setup. It cannot do the
+two **hardware** steps (flashing the DSP EEPROM needs the physical J1 jumper, and
+wiring the speakers/optical cable) — those are guided at the end of the run.
+
+> ⚠️ **Volume safety:** this drives a real amplifier at full power. The installer
+> deliberately stores a **low** starting `DSPVolume`. Keep the volume low on first
+> sound and raise it gradually.
+
+**Prerequisites:** a fresh **Raspberry Pi OS Lite 64‑bit**, SSH/network up, and the
+Beocreate board fitted (J5 voltage limiter set).
+
+```bash
+git clone https://github.com/PSi86/BeoSuiteLite
+cd BeoSuiteLite
+sudo ./install.sh            # base software: apt, boot config, hifiberry-dsp,
+                             # Beocreate 2 (+ our patches/extensions), go-librespot, shim
+```
+
+Then the guided hardware steps:
+
+```bash
+sudo reboot                  # 1) apply the SPI/I2S overlay + spidev.bufsiz
+
+# 2) flash the DSP program (power off → REMOVE jumper J1 → power on):
+sudo ./install.sh flash-dsp
+#    then: power off → RE‑INSERT J1 → power on (DSP now self‑boots)
+
+# 3) set + persist a safe starting volume (DSP running):
+sudo ./install.sh safe-volume
+```
+
+Open `http://<pi-ip>/` for the web UI, and select **“Beocreate”** in the Spotify
+app (Premium required for playback).
+
+**What the installer does (idempotent, re‑runnable):** enables the HiFiBerry DAC +
+SPI/I2S/I2C in `config.txt`, sets `spidev.bufsiz` in `cmdline.txt`, adds the
+HiFiBerry apt repo and installs `hifiberry-dsp` (with the `sigmatcpserver`
+override for `:8086` + `DSPVolume`), clones **Beocreate 2** from
+`bang-olufsen/create` and applies the deltas from `deploy/` (guard preload,
+patched `sound`/`toslink`, the custom `spotify` source, `/etc/beocreate` configs,
+Express‑4 pin), installs **go‑librespot** `v0.7.4` + config + service, and the
+**audiocontrol2 shim**; all services are `enable`d.
+
+**Other DSP boards:** replace `dsp/*.xml`, adjust `cardType`/`cardFeatures` in
+`deploy/etc-beocreate/system.json`, and the ALSA device name in
+`deploy/go-librespot/config.yml` — the architecture and glue carry over
+(see [Key findings & fixes](#key-findings--fixes)).
+
 ## Architecture
 
 ```
@@ -95,6 +145,7 @@ Pi (Raspberry Pi OS Lite): reachable on the local network by its hostname or DHC
 
 ## Repo structure
 
-- `deploy/` — deployment artifacts (see table)
+- `install.sh` — idempotent installer (`install` · `flash-dsp` · `safe-volume`)
+- `deploy/` — deployment artifacts (see table); incl. `hifiberry/` (apt keyring) and the vendored, patched `beo-extensions/sound/index.js`
 - `dsp/` — DSP program (EEPROM image as XML)
 - `_old_/` — reference material (old ChatGPT chat, moOde v9 port); **gitignored**
