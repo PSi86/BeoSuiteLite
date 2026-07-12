@@ -1,0 +1,18 @@
+Toslink-Extension: getSigmaTCPSettings() liefert `undefined`, wenn
+/etc/sigmatcp.conf nicht existiert (readConfiguration in dsp-programs hat
+keinen expliziten Rückgabewert für den Datei-fehlt-Fall). Der Startup-Handler
+las darauf `.server` und warf eine uncaughtException. Solange die toslink-
+Extension gar nicht geladen wurde (fehlendes cardFeature "toslink"), fiel das
+nicht auf. Jetzt: defensiver Null-Check, damit der Startup-Listener-Lauf
+deterministisch durchläuft.
+
+--- a/beo-extensions/toslink/index.js
++++ b/beo-extensions/toslink/index.js
+@@ -63,7 +63,7 @@
+ 			if (beo.extensions["dsp-programs"] && beo.extensions["dsp-programs"].getSigmaTCPSettings) {
+ 				configuration = beo.extensions["dsp-programs"].getSigmaTCPSettings();
+-				if (configuration.server &&
++				if (configuration && configuration.server &&
+ 					configuration.server.lgsoundsync &&
+ 					configuration.server.lgsoundsync == 1 &&
+ 					!configuration.server.lgsoundsync.comment) {

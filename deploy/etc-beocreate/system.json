@@ -1,6 +1,6 @@
 {
   "cardType": "Beocreate 4-Channel Amplifier",
-  "cardFeatures": ["dsp"],
+  "cardFeatures": ["dsp", "toslink"],
   "port": 80,
   "language": "en",
   "defaultAppearance": "default",

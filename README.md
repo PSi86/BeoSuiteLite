@@ -22,7 +22,12 @@ hifiberry-dsp · sigmatcpserver (ALS ROOT): --alsa --enable-rest
         └─ REST 127.0.0.1:13141    (Diagnose / Register-Zugriff)
         │  (SPI) → ADAU1451-DSP ← Programm aus EEPROM (Self-Boot, J1 gesetzt)
         │
-Beocreate 2 UI (Node 20) :80  ← EQ / 4-Kanal / Optical / Lautstärke
+audiocontrol-shim (Node) :81  ← eigener, schlanker audiocontrol2-Ersatz
+        ├─ GET  /api/player/status · /api/track/metadata · /api/volume
+        ├─ POST /api/player/<cmd> · /activate/<name> · /api/track/love
+        └─ POST /internal/player   (Naht für spätere go-librespot-Bridge)
+        │
+Beocreate 2 UI (Node 20) :80  ← EQ / 4-Kanal / Optical / Lautstärke / Quellen
 ```
 
 Das DSP‑Programm (`beocreate-universal-11.xml`) liegt **im EEPROM des Boards** und wird bei jedem Einschalten vom DSP selbst geladen (Self‑Boot). Der Pi muss dafür **keine** Software laufen lassen. `hifiberry-dsp` + Beocreate 2 sind nur für Steuerung/UI zuständig.
@@ -37,19 +42,25 @@ Das DSP‑Programm (`beocreate-universal-11.xml`) liegt **im EEPROM des Boards**
 6. **audiocontrol2‑Kopplung:** `sound`/`sources` rufen `http://127.0.1.1:81/api/…` (audiocontrol2). Fehlt der Dienst, crashen unbehandelte Fetch‑Rejections den Server → **Guard‑Preload** (`beo-guard.js`, `node --require`) fängt sie ab. Zusätzlich Extension‑**Allowlist** (`enabledExtensions`), um HiFiBerryOS‑/Streaming‑Extensions (network, mpd, spotify, …) auszuschließen.
 7. **Lautstärke‑Regler tot:** `getVolumeViaAudioControl` hat **kein `.catch()`** → bei fehlendem audiocontrol2 wird der Callback nie aufgerufen → `determineVolumeControl` läuft nie → `volumeControl=0`. **Fix:** kleiner Patch (`.catch → callback(null)`, siehe `deploy/patches/`) + `sound.json` `"mixer":"DSPVolume"`. Danach Regler funktioniert (steuert Reg 106).
 8. **TOSLINK‑Quelle:** Default `toslinkEnabled:false` → nie aktiv. `toslink.json` `"toslinkEnabled":true` → Auto‑Aktivierung bei Signal (Reg 93), setzt Reg 4841=1.
+9. **⭐ `cardFeatures` muss `"toslink"` enthalten (die eigentliche Ursache für die fehlende Quellen‑Liste):** Beocreate lädt eine Extension nur, wenn ALLE ihre `requireCardFeatures` (aus deren `package.json`) in `system.json` → `cardFeatures` stehen. Die `toslink`‑Extension verlangt `["toslink"]`. Mit `cardFeatures:["dsp"]` wurde ihr Server‑Code **still übersprungen** (kein Fehler im Log, nur die harmlose Zeile „…listed to be loaded"), d. h. die Optical‑Quelle wurde nie registriert und das Auto‑Unmute‑Polling nie gestartet. Fix: `cardFeatures:["dsp","toslink"]`. Danach: „Registering source 'toslink'…" → „All sources registered." → „Polling Toslink status every 2 seconds…" → Optical erscheint in der Quellen‑Liste. (Feature‑Vokabular der Extensions: `dsp`, `toslink`, `analoginput`, `bluetooth`, `arm7`, `localui`.)
+10. **audiocontrol2‑Shim (`:81`):** eigener, abhängigkeitsfreier Node‑Dienst, der die von `sources`/`sound` erwartete REST‑Teilmenge liefert (leere Player‑Liste + Live‑Lautstärke aus `DSPVolume`). Beseitigt die `ECONNREFUSED`‑/`unhandledRejection`‑Flut sauber (statt sie nur per Guard/`.catch` abzufangen) und ist die Naht, an der später **go‑librespot** Spotify als echte Quelle einspeist (`POST /internal/player`).
+11. **toslink‑Robustheit:** `dsp-programs.getSigmaTCPSettings()` liefert `undefined`, wenn `/etc/sigmatcp.conf` fehlt; der toslink‑Startup las darauf `.server` → uncaughtException. Ein‑Zeilen‑Null‑Check (`deploy/patches/toslink-sigmatcp-nullcheck.patch`) macht den Startup‑Listener‑Lauf deterministisch.
 
 ## Deployment‑Artefakte (`deploy/`)
 
 | Datei | Ziel auf dem Pi | Zweck |
 |---|---|---|
-| `systemd/beocreate2.service` | `/etc/systemd/system/` | Beocreate‑2‑UI (Node, als root). **Hinweis:** enthält aktuell `vv` (Debug) — für Produktion entfernen. |
+| `systemd/beocreate2.service` | `/etc/systemd/system/` | Beocreate‑2‑UI (Node, als root); `After/Wants audiocontrol-shim`. **Hinweis:** enthält aktuell `v` (Debug‑Stufe 1) — für Produktion entfernen. |
 | `systemd/sigmatcpserver.service.d/override.conf` | `/etc/systemd/system/sigmatcpserver.service.d/` | Flags‑Override (8086 + DSPVolume) |
-| `etc-beocreate/system.json` | `/etc/beocreate/` | cardType/Port/Extension‑Allowlist |
+| `audiocontrol-shim/shim.js` | `/opt/beocreate/audiocontrol-shim/` | eigener audiocontrol2‑Ersatz auf `:81` |
+| `audiocontrol-shim/audiocontrol-shim.service` | `/etc/systemd/system/` | systemd‑Unit für den Shim (als root, `enable`d) |
+| `etc-beocreate/system.json` | `/etc/beocreate/` | cardType/**cardFeatures `["dsp","toslink"]`**/Port/Extension‑Allowlist |
 | `etc-beocreate/sound.json` | `/etc/beocreate/` | `mixer: DSPVolume` (Lautstärke‑Fix) |
 | `etc-beocreate/toslink.json` | `/etc/beocreate/` | `toslinkEnabled: true` |
 | `etc-modprobe.d/spidev.conf` | `/etc/modprobe.d/` | `bufsiz=131072` (große SPI‑Reads; **greift noch nicht bei Boot → offen: via cmdline.txt**) |
 | `opt-beocreate/beo-guard.js` | `/opt/beocreate/` | globaler Fehler‑Guard (Preload) |
 | `patches/sound-audiocontrol-catch.patch` | `beo-extensions/sound/index.js` | `.catch` am audiocontrol‑Fetch |
+| `patches/toslink-sigmatcp-nullcheck.patch` | `beo-extensions/toslink/index.js` | Null‑Check gegen fehlende `/etc/sigmatcp.conf` |
 | `config.txt.additions` | `/boot/firmware/config.txt` | hifiberry‑dac + SPI/I2S/I2C + audio=off |
 | `../dsp/beocreate-universal-11.xml` | `~/` → EEPROM | DSP‑Programm (checksum `97C9C5…`) |
 
@@ -57,12 +68,11 @@ Beocreate 2 selbst wird aus `github.com/bang-olufsen/create` nach `/opt/beocreat
 
 ## Aktueller Stand
 
-**Funktioniert:** DSP self‑bootet (übersteht Power‑Cycle) · TOSLINK/PC hörbar, Stereo korrekt · Beocreate‑2‑UI auf `:80` (EQ, Kanäle, Optical, Beosonic, Presets) · **Master‑Lautstärke‑Regler in der UI**.
+**Funktioniert:** DSP self‑bootet (übersteht Power‑Cycle) · TOSLINK/PC hörbar, Stereo korrekt · Beocreate‑2‑UI auf `:80` (EQ, Kanäle, Optical, Beosonic, Presets) · **Master‑Lautstärke‑Regler in der UI** · **audiocontrol2‑Shim auf `:81`** (saubere Logs, keine `ECONNREFUSED`‑Flut mehr) · **Quellen‑Liste zeigt „Optical Input"** (auto‑aktiviert bei PC‑Signal, mit Auto‑Unmute‑Polling).
 
 **Offen / nächste Schritte:**
-- **audiocontrol2‑Shim** (eigener, minimaler Dienst auf :81) → Quellen‑Liste, Now‑Playing, Grundlage für **Spotify als Quelle**.
-- **Spotify Connect** (`go-librespot`) + automatische TOSLINK‑Priorität.
-- `bufsiz` persistent via `cmdline.txt`; Debug (`vv`) aus `beocreate2.service` entfernen; Reboot/Power‑Cycle‑Härtung.
+- **Spotify Connect** (`go-librespot`) als echte Quelle über die Shim‑Naht `POST /internal/player` + automatische TOSLINK‑Priorität.
+- `bufsiz` persistent via `cmdline.txt`; Debug (`v`) aus `beocreate2.service` entfernen; Reboot/Power‑Cycle‑Härtung.
 
 ## ⚠️ Lautstärke‑Sicherheit
 
