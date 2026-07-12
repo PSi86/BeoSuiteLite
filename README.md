@@ -91,7 +91,7 @@ DSP register **106** = linear factor (8.24 fixed point): `1.0 = 0 dB = full scal
 
 ## Access
 
-Pi (RPiOS Lite): hostname `beocreate` (formerly `Pi3-beo`), IP on the LAN (DHCP, most recently `<pi-ip>`), user `pi` (passwordless sudo). Web UI: `http://<IP>/`.
+Pi (Raspberry Pi OS Lite): reachable on the local network by its hostname or DHCP address; default user `pi`. Web UI: `http://<pi-ip>/`.
 
 ## Repo structure
 
