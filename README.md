@@ -60,11 +60,15 @@ app (Premium required for playback).
 **What the installer does (idempotent, re‑runnable):** enables the HiFiBerry DAC +
 SPI/I2S/I2C in `config.txt`, sets `spidev.bufsiz` in `cmdline.txt`, adds the
 HiFiBerry apt repo and installs `hifiberry-dsp` (with the `sigmatcpserver`
-override for `:8086` + `DSPVolume`), clones **Beocreate 2** from
-`bang-olufsen/create` and applies the deltas from `deploy/` (guard preload,
-patched `sound`/`toslink`, the custom `spotify` source, `/etc/beocreate` configs,
-Express‑4 pin), installs **go‑librespot** `v0.7.4` + config + service, and the
-**audiocontrol2 shim**; all services are `enable`d.
+override for `:8086` + `DSPVolume`, loopback only), fetches **Beocreate 2** from
+`bang-olufsen/create` at a pinned commit (upstream is frozen since 2021), installs
+its npm dependencies with `npm ci` from the lockfile in `deploy/beocreate/`
+(Express 4 pinned), applies the deltas from `deploy/` (guard preload, patched
+`sound`/`toslink`, the custom `spotify` source, `/etc/beocreate` configs — existing
+`sound.json`/`toslink.json` are kept on a re‑run), installs **go‑librespot**
+`v0.10.2` (SHA‑256 verified; a re‑run upgrades it when the pinned version changes)
++ config + service, the **audiocontrol2 shim** and the DSP watchdog; all services
+are `enable`d.
 
 **Other DSP boards:** replace `dsp/*.xml`, adjust `cardType`/`cardFeatures` in
 `deploy/etc-beocreate/system.json`, and the ALSA device name in
@@ -122,7 +126,8 @@ The DSP program (`beocreate-universal-11.xml`) resides **in the board's EEPROM**
 | `audiocontrol-shim/audiocontrol-shim.service` | `/etc/systemd/system/` | systemd unit for the shim (as root, `enable`d) |
 | `dsp-watchdog/dsp-watchdog.sh` + `.service` | `/opt/beocreate/dsp-watchdog/` + `/etc/systemd/system/` | runtime self‑healing watchdog (heal → reboot → degraded) |
 | `go-librespot/config.yml` | `~pi/.config/go-librespot/` | Spotify Connect config (avahi, plughw, API :3678, safe volume) |
-| `go-librespot/go-librespot.service` | `/etc/systemd/system/` | Service (user `pi`, `enable`d); binary `v0.7.4` arm64 to `/opt/go-librespot/` |
+| `go-librespot/go-librespot.service` | `/etc/systemd/system/` | Service (user `pi`, `enable`d); binary `v0.10.2` arm64 to `/opt/go-librespot/` (version in `VERSION`) |
+| `beocreate/package.json` + `package-lock.json` | `/opt/beocreate/` | npm dependencies of Beocreate 2 + enabled extensions (upstream has none at this level); installed with `npm ci` |
 | `beo-extensions/spotify/` | `/opt/beocreate/beo-extensions/spotify/` | minimal Spotify source extension (tile/icon/on‑off switch); replaces the original (backup: `~pi/beo-extension-spotify-orig`) |
 | `beo-extensions/toslink/index.js` | `/opt/beocreate/beo-extensions/toslink/` | **vendored** (upstream + null check + source re‑assert) |
 | `etc-beocreate/system.json` | `/etc/beocreate/` | cardType/**cardFeatures `["dsp","toslink"]`**/port/extension allowlist (incl. `spotify`) |
@@ -136,7 +141,7 @@ The DSP program (`beocreate-universal-11.xml`) resides **in the board's EEPROM**
 | `config.txt.additions` | `/boot/firmware/config.txt` | hifiberry‑dac + SPI/I2S/I2C + audio=off |
 | `../dsp/beocreate-universal-11.xml` | `~/` → EEPROM | DSP program (checksum `97C9C5…`) |
 
-Beocreate 2 itself is deployed from `github.com/bang-olufsen/create` to `/opt/beocreate` (contents of `Beocreate2/` + `beocreate_essentials/`); npm deps in `/opt/beocreate/node_modules` with `express@^4.18`.
+Beocreate 2 itself is deployed from `github.com/bang-olufsen/create` to `/opt/beocreate` (contents of `Beocreate2/` + `beocreate_essentials/`); npm deps in `/opt/beocreate/node_modules` (from `deploy/beocreate/`, Express 4.22).
 
 ## Current status
 
@@ -179,7 +184,7 @@ Pi (Raspberry Pi OS Lite): reachable on the local network by its hostname or DHC
 
 ## Repo structure
 
-- `install.sh` — idempotent installer (`install` · `flash-dsp` · `safe-volume`)
+- `install.sh` — idempotent installer (`install` · `check-dsp` · `flash-dsp` · `safe-volume`)
 - `deploy/` — deployment artifacts (see table); incl. `hifiberry/` (apt keyring) and the vendored, patched `beo-extensions/sound/index.js`
 - `dsp/` — DSP program (EEPROM image as XML)
 - `_old_/` — reference material (old ChatGPT chat, moOde v9 port); **gitignored**
