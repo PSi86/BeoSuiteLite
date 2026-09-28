@@ -30,6 +30,7 @@ GLR_VERSION="v0.10.2"
 GLR_SHA256="800b174f066624edf37caec8266fd08e914e6fd837b2c92a4042aa21c0bafa4d"  # go-librespot_linux_arm64.tar.gz
 # Upstream Beocreate 2 is frozen (last commit 2021-03-16); pin it for reproducible installs.
 BEOCREATE_COMMIT="1afe3d701cc1947b8225f45c03f674ff4aed1814"
+HBDSP_VERSION="1.5.5"   # hifiberry-dsp version verified with this setup
 DSP_PROFILE="beocreate-universal-11.xml"
 SAFE_VOLUME_PCT="40"
 DSP_CHECKSUM_EXPECTED="97C9C5A88582888D111259BF70D6D79E"
@@ -98,7 +99,10 @@ phase_dsp_backend() {
 	echo "deb [signed-by=/usr/share/keyrings/hifiberry-archive-keyring.gpg] http://debianrepo.hifiberry.com ${codename} main" \
 		> /etc/apt/sources.list.d/hifiberry.list
 	apt-get update -y
-	apt-get install -y hifiberry-dsp
+	if ! apt-get install -y --allow-downgrades "hifiberry-dsp=$HBDSP_VERSION"; then
+		warn "hifiberry-dsp $HBDSP_VERSION is not in the repo any more — installing the current version (untested with this setup)."
+		apt-get install -y hifiberry-dsp
+	fi
 
 	info "sigmatcpserver override: enable SigmaTCP :8086 + DSPVolume (--alsa --enable-rest)"
 	install -d /etc/systemd/system/sigmatcpserver.service.d

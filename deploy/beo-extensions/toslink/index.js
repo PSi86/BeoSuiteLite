@@ -177,7 +177,9 @@ var beoDSP = require('../../beocreate_essentials/dsp');
 			if (event.content.stopsOtherSources != undefined) {
 				settings.toslinkStopsOtherSources = event.content.stopsOtherSources;
 				beo.bus.emit("ui", {target: "toslink", header: "toslinkSettings", content: {settings: settings, canControlToslink: canControlToslink}});
-				beo.bus.emit("settings", {header: "saveSettings", content: {element: "toslink", settings: settings}});
+				// Upstream passed "element:", which beo-server's saveSettings ignores (it
+				// requires "extension"), so this setting was never persisted.
+				beo.bus.emit("settings", {header: "saveSettings", content: {extension: "toslink", settings: settings}});
 				if (sources) {
 					sources.setSourceOptions("toslink", {
 						stopOthers: settings.toslinkStopsOtherSources
