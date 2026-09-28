@@ -27,12 +27,19 @@ set -o pipefail   # deliberately NOT set -e / -u: the loop must survive any erro
 CHECK_INTERVAL="${CHECK_INTERVAL:-30}"                     # seconds between checks
 STARTUP_GRACE="${STARTUP_GRACE:-60}"                       # settle time after boot
 GRACE_AFTER_ACTION="${GRACE_AFTER_ACTION:-20}"             # settle time after a restart
+RECHECK_DELAY="${RECHECK_DELAY:-15}"                       # confirm a failure once before acting
+                                                           # (e.g. a manual restart still starting up)
 MAX_HEALS_BEFORE_REBOOT="${MAX_HEALS_BEFORE_REBOOT:-3}"    # failed heals before a reboot
 REBOOT_ENABLED="${REBOOT_ENABLED:-1}"                      # 0 = never reboot (log instead)
 MIN_SECONDS_BETWEEN_REBOOTS="${MIN_SECONDS_BETWEEN_REBOOTS:-1800}"  # reboot-loop guard (30 min)
 DEGRADED_BACKOFF="${DEGRADED_BACKOFF:-300}"                # slow-poll while unrecoverable
 DSP_REST="${DSP_REST:-http://127.0.0.1:13141}"
-DSP_CHECKSUM_EXPECTED="${DSP_CHECKSUM_EXPECTED:-97C9C5A88582888D111259BF70D6D79E}"  # empty = accept any valid program
+# Expected program checksum: an explicit DSP_CHECKSUM_EXPECTED wins; otherwise it is
+# read from the profile sigmatcpserver holds as the installed program (updated when
+# a program is installed via Beocreate/dsptoolkit), falling back to the shipped one.
+DSP_CHECKSUM_EXPECTED="${DSP_CHECKSUM_EXPECTED:-}"
+DSP_PROGRAM_XML="${DSP_PROGRAM_XML:-/var/lib/hifiberry/dspprogram.xml}"
+DSP_CHECKSUM_FALLBACK="97C9C5A88582888D111259BF70D6D79E"   # beocreate-universal-11.xml
 ALSA_MIXER="${ALSA_MIXER:-DSPVolume}"
 BEOCREATE_URL="${BEOCREATE_URL:-http://127.0.0.1:80/}"     # UI liveness probe
 SIGMATCP_SERVICE="${SIGMATCP_SERVICE:-sigmatcpserver.service}"
@@ -46,14 +53,22 @@ dsp_checksum() {
 		| grep -oE '"checksum":"[0-9A-Fa-f]+"' | head -1 | sed 's/.*:"//; s/"//'
 }
 
+expected_checksum() {
+	if [ -n "$DSP_CHECKSUM_EXPECTED" ]; then echo "$DSP_CHECKSUM_EXPECTED"; return; fi
+	local cs
+	cs="$(grep -oE '<metadata type="checksum">[0-9A-Fa-f]+<' "$DSP_PROGRAM_XML" 2>/dev/null \
+		| head -1 | sed 's/.*">//; s/<$//' | tr 'a-f' 'A-F')"
+	echo "${cs:-$DSP_CHECKSUM_FALLBACK}"
+}
+
 REASON=""
 healthy() {
 	REASON=""
 	if ! systemctl is-active --quiet "$SIGMATCP_SERVICE"; then REASON="$SIGMATCP_SERVICE not active"; return 1; fi
-	local cs; cs="$(dsp_checksum)"
+	local cs expected; cs="$(dsp_checksum)"; expected="$(expected_checksum)"
 	if [ -z "$cs" ]; then REASON="DSP not responding (no checksum via REST)"; return 1; fi
-	if [ -n "$DSP_CHECKSUM_EXPECTED" ] && [ "$cs" != "$DSP_CHECKSUM_EXPECTED" ]; then
-		REASON="DSP checksum mismatch (got $cs)"; return 1
+	if [ "$cs" != "$expected" ]; then
+		REASON="DSP checksum mismatch (got $cs, expected $expected)"; return 1
 	fi
 	if ! amixer sget "$ALSA_MIXER" >/dev/null 2>&1; then REASON="ALSA control '$ALSA_MIXER' missing"; return 1; fi
 	# Beocreate 2 UI must be serving (also catches it being torn down when
@@ -98,6 +113,17 @@ while true; do
 		if [ "$degraded" = 1 ] || [ "$fails" -gt 0 ]; then log "RECOVERED: DSP is healthy again."; fi
 		fails=0; degraded=0
 		sleep "$CHECK_INTERVAL"; continue
+	fi
+
+	# A single failed check can be a service that is just (re)starting, e.g. after a
+	# manual restart or a package upgrade: confirm it once before counting it.
+	if [ "$degraded" = 0 ] && [ "$fails" = 0 ]; then
+		first_reason="$REASON"
+		sleep "$RECHECK_DELAY"
+		if healthy; then
+			log "transient: $first_reason (healthy again after ${RECHECK_DELAY}s, no action)"
+			sleep "$CHECK_INTERVAL"; continue
+		fi
 	fi
 
 	# In degraded mode we only monitor + log (auto-restarts don't help here).

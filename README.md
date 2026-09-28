@@ -76,10 +76,10 @@ Express‑4 pin), installs **go‑librespot** `v0.7.4` + config + service, and t
 ```
 /boot/firmware/config.txt: dtoverlay=hifiberry-dac, dtparam=spi=on,i2s=on,i2c_arm=on, audio=off
         │
-hifiberry-dsp · sigmatcpserver (AS ROOT): --alsa --enable-rest
-        ├─ SigmaTCP 0.0.0.0:8086   ← Beocreate 2 (beocreate_essentials/dsp.js)
+hifiberry-dsp · sigmatcpserver (AS ROOT): --alsa --enable-rest   (loopback only, see below)
+        ├─ SigmaTCP :8086          ← Beocreate 2 (beocreate_essentials/dsp.js → 127.0.1.1)
         ├─ ALSA-Control "DSPVolume" ↔ DSP-Register 106   (--alsa AlsaSync)
-        └─ REST 127.0.0.1:13141    (diagnostics / register access)
+        └─ REST :13141             (diagnostics / register access; watchdog, installer)
         │  (SPI) → ADAU1451-DSP ← program from EEPROM (self-boot, J1 set)
         │
 audiocontrol-shim (Node) :81  ← audiocontrol2 replacement + Spotify integration
@@ -99,7 +99,7 @@ The DSP program (`beocreate-universal-11.xml`) resides **in the board's EEPROM**
 ## Key findings & fixes
 
 1. **DSP programming deadlock (the "difficult DSP connection"):** With J1 (self‑boot) set **and an empty EEPROM**, the DSP cannot be programmed — program/data RAM is dead (all reads 0, "SPI returned only zeros"), only the control registers (0xF000+) are reachable. The old v9/moOde setup had erased the EEPROM → deadlock. **Solution (documented by HiFiBerry):** shut down the Pi, remove power, **pull J1**, boot, `dsptoolkit install-profile ~/beocreate-universal-11.xml` → loads the program into RAM (0xC000/DM0) **and** writes the EEPROM. Then **set J1 again + power‑cycle** → DSP self‑boots permanently. Success = checksum signature `97C9C5…`, program length 1142 words.
-2. **`sigmatcpserver` flags:** The package default `--localhost --disable-tcp` turns off the 8086 server (which Beocreate 2 needs). Override → `--alsa --enable-rest` (binds `0.0.0.0:8086`, creates `DSPVolume`).
+2. **`sigmatcpserver` flags:** The package default `--localhost --disable-tcp` turns off the 8086 server (which Beocreate 2 needs). Override → `--alsa --enable-rest` (creates `DSPVolume`). Without `--localhost` both SigmaTCP `:8086` and the **unauthenticated** REST API `:13141` bind to `0.0.0.0` — anyone on the LAN could write DSP registers (volume above 0 dB) or load another program. `--localhost`/`--bind-address` can't be used: Beocreate connects to `127.0.1.1`, `dsptoolkit` to `127.0.0.1`, and one bind address serves only one of them. The override therefore restricts the unit with systemd `IPAddressAllow=localhost` / `IPAddressDeny=any` (whole loopback range allowed, LAN dropped). The package's `--store --restore` are **deliberately not used**: `--restore` would re-apply the volume register at boot and bypass the safe stored start volume.
 3. **`--alsa` bug (1.3.11):** `create_mixer` internally calls `Mixer(name)` without a card specification → fails if the control does not yet exist → the service aborts. **Once `DSPVolume` exists** (`amixer` + `alsactl store`), `--alsa` finds it and runs. The initial value is deliberately stored low (30 % ≈ −42 dB).
 4. **Beocreate 2 crashes with Express 5** (`path-to-regexp 8`, `beo-server.js:366`) → **pin Express to `^4.18`** (installs 4.22.2 / path‑to‑regexp 0.1.13).
 5. **`beocreate_essentials`** sits at the top level of the repo (not in `Beocreate2/`) → must be moved to `/opt/beocreate/beocreate_essentials`.
@@ -151,7 +151,11 @@ A **DSP watchdog** (`dsp-watchdog.service`) monitors the DSP subsystem every 30 
 recovers from faults automatically, logging every step (`journalctl -u dsp-watchdog`):
 
 - **Health check:** `sigmatcpserver` active · DSP answers over REST with the expected
-  program **checksum** · the `DSPVolume` ALSA control exists · the Beocreate 2 UI serves on `:80`.
+  program **checksum** (taken from the installed program `/var/lib/hifiberry/dspprogram.xml`,
+  so a program installed via the UI is not mistaken for a fault) · the `DSPVolume` ALSA
+  control exists · the Beocreate 2 UI serves on `:80`.
+- **Debounce:** a failed check is confirmed once after 15 s before anything is restarted,
+  so a manual restart or package upgrade that is still starting up does not trigger a heal.
 - **Escalation:** unhealthy → **restart `sigmatcpserver` + `beocreate2`** (a `sigmatcpserver`
   restart tears `beocreate2` down via `Requires=`, so both are brought back) → after
   repeated failures, **reboot the Pi** (last resort, to re‑trigger DSP self‑boot),
