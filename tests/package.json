@@ -1,0 +1,11 @@
+{
+  "name": "beosuitelite-tests",
+  "private": true,
+  "description": "Local tests for BeoSuiteLite components",
+  "scripts": {
+    "test": "node shim-events.test.js"
+  },
+  "devDependencies": {
+    "websocket": "1.0.35"
+  }
+}

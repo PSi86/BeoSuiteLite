@@ -5,9 +5,10 @@
 // ------------------------------------------------------------------------
 // Beocreate 2 was written for HiFiBerryOS and expects its "audiocontrol2"
 // daemon at http://127.0.1.1:81. This shim provides the REST subset that the
-// "sources"/"sound" extensions require — lean, with no npm dependencies (Node
-// built-ins only) — and additionally handles the Spotify integration via
-// go-librespot.
+// "sources"/"sound" extensions require — lean, Node built-ins plus the
+// "websocket" client that Beocreate's own node_modules already carries
+// (/opt/beocreate/node_modules) — and additionally handles the Spotify
+// integration via go-librespot.
 //
 // audiocontrol2 REST (used by Beocreate):
 //   - GET  /api/player/status    -> { players: [...], last_updated }
@@ -17,9 +18,14 @@
 //   - POST /api/player/activate/<name> · /api/track/love|unlove
 //
 // Spotify (go-librespot):
-//   - The shim POLLS go-librespot (GET :3678/status) and forwards state +
-//     metadata as an audiocontrol2 push to Beocreate
-//     (POST :80/sources/metadata -> processAudioControlMetadata).
+//   - The shim listens to go-librespot's event stream (WebSocket :3678/events).
+//     On every (re)connect and on each state/track event it reads one
+//     consistent snapshot (GET :3678/status) and, if anything changed, forwards
+//     state + metadata as an audiocontrol2 push to Beocreate
+//     (POST :80/sources/metadata -> processAudioControlMetadata). No timer runs
+//     while nothing happens.
+//   - A restarted Beocreate needs no re-push: after registering its sources it
+//     pulls /api/player/status + /api/track/metadata from here itself.
 //   - Transport commands from the Beocreate UI arrive here as
 //     POST /api/player/<cmd> and are forwarded to go-librespot
 //     (:3678/player/<cmd>).
@@ -33,14 +39,16 @@
 
 const http = require("http");
 const { execFile } = require("child_process");
+const WebSocketClient = require("websocket").client;
 
-const PORT = 81;
-const HOST = "0.0.0.0";
+const PORT = parseInt(process.env.SHIM_PORT || "81", 10);
+const HOST = "0.0.0.0";                   // LAN access is blocked in the systemd unit
 const ALSA_MIXER = "DSPVolume";
-const GLR_API = "http://127.0.0.1:3678";  // go-librespot API
-const BEO_API = "http://127.0.0.1:80";    // Beocreate server (bus push)
-const SPOTIFY_POLL_MS = 1000;
-const SPOTIFY_REPUSH_MS = 10000;          // periodic re-push (survives a Beocreate restart)
+const GLR_API = process.env.SHIM_GLR_API || "http://127.0.0.1:3678";  // go-librespot API
+const GLR_EVENTS = GLR_API.replace(/^http/, "ws") + "/events";
+const BEO_API = process.env.SHIM_BEO_API || "http://127.0.0.1:80";    // Beocreate server (bus push)
+const RECONNECT_MIN_MS = 1000;            // event stream reconnect backoff
+const RECONNECT_MAX_MS = 10000;           // (go-librespot restarted or switched off)
 const DEBUG = process.env.SHIM_DEBUG === "1";
 
 // ---------------------------------------------------------------------------
@@ -133,7 +141,6 @@ const TRANSPORT_MAP = { play: "resume", pause: "pause", playpause: "playpause", 
 
 let spotifyLastKey = null;
 let spotifyLastState = "stopped";
-let spotifyLastPush = 0;
 
 function deriveSpotifyState(s) {
 	if (!s || s.stopped || !s.track) return "stopped";
@@ -142,68 +149,128 @@ function deriveSpotifyState(s) {
 }
 
 function pushMetadataToBeocreate(meta) {
-	spotifyLastPush = Date.now();
 	httpJSON("POST", BEO_API + "/sources/metadata", meta, (err) => {
 		if (err) log("push to Beocreate failed:", err.message);
 	});
 }
 
-function pollSpotify() {
+// No session / go-librespot gone: report "stopped" once.
+function markSpotifyStopped() {
+	if (spotifyLastState !== "stopped") {
+		spotifyLastState = "stopped"; spotifyLastKey = "stopped||";
+		delete players["spotify"];
+		if (currentMetadata.playerName === "spotify") currentMetadata = {};
+		touch();
+		pushMetadataToBeocreate({ playerName: "spotify", playerState: "stopped" });
+	}
+}
+
+// Events say THAT something changed; the snapshot says WHAT the state is now.
+// Reading /status per event keeps a single, consistent derivation (the
+// "paused"/"playing" payloads carry no track, "metadata" can precede
+// "playing"). Reads are serialised so an older response can never overwrite a
+// newer one: an event arriving mid-read just schedules one more read.
+let syncInFlight = false;
+let syncAgain = false;
+
+function syncSpotify() {
+	if (syncInFlight) { syncAgain = true; return; }
+	syncInFlight = true;
 	httpJSON("GET", GLR_API + "/status", null, (err, code, status) => {
-		if (err || code !== 200 || !status) {
-			// go-librespot unreachable / no session: fall back to "stopped" if needed.
-			if (spotifyLastState !== "stopped") {
-				spotifyLastState = "stopped"; spotifyLastKey = "stopped||";
-				delete players["spotify"]; touch();
-				pushMetadataToBeocreate({ playerName: "spotify", playerState: "stopped" });
-			}
-			return;
-		}
-		const state = deriveSpotifyState(status);
-		const track = status.track || {};
-		const meta = {
-			playerName: "spotify",
-			playerState: state,
-			title: track.name || "",
-			artist: Array.isArray(track.artist_names) ? track.artist_names.join(", ") : (track.artist_names || ""),
-			albumTitle: track.album_name || "",
-			artUrl: "",
-			externalArtUrl: track.album_cover_url || "",
-			streamUrl: track.uri || "",
-			loved: false,
-			loveSupported: false
-		};
-		const key = state + "|" + meta.title + "|" + meta.artist + "|" + meta.albumTitle;
-		const changed = key !== spotifyLastKey;
-		const stale = (Date.now() - spotifyLastPush) > SPOTIFY_REPUSH_MS;
-
-		if (state === "stopped") {
-			if (changed) {
-				spotifyLastKey = key; spotifyLastState = state;
-				delete players["spotify"];
-				if (currentMetadata.playerName === "spotify") currentMetadata = {};
-				touch();
-				pushMetadataToBeocreate(meta);
-			}
-			return;
-		}
-
-		if (changed) {
-			players["spotify"] = {
-				name: "spotify",
-				state: state,
-				supported_commands: ["play", "pause", "next", "previous"],
-				title: meta.title,
-				artist: meta.artist
-			};
-			currentMetadata = meta; // keep /api/track/metadata consistent
-			touch();
-		}
-		if (changed || stale) {
-			spotifyLastKey = key; spotifyLastState = state;
-			pushMetadataToBeocreate(meta);
-		}
+		// 204 = go-librespot runs but has no session.
+		if (err || code !== 200 || !status) markSpotifyStopped();
+		else applySpotifyStatus(status);
+		syncInFlight = false;
+		if (syncAgain) { syncAgain = false; syncSpotify(); }
 	});
+}
+
+function applySpotifyStatus(status) {
+	const state = deriveSpotifyState(status);
+	const track = status.track || {};
+	const meta = {
+		playerName: "spotify",
+		playerState: state,
+		title: track.name || "",
+		artist: Array.isArray(track.artist_names) ? track.artist_names.join(", ") : (track.artist_names || ""),
+		albumTitle: track.album_name || "",
+		artUrl: "",
+		externalArtUrl: track.album_cover_url || "",
+		streamUrl: track.uri || "",
+		loved: false,
+		loveSupported: false
+	};
+	const key = state + "|" + meta.title + "|" + meta.artist + "|" + meta.albumTitle;
+	if (key === spotifyLastKey) return;
+	spotifyLastKey = key; spotifyLastState = state;
+
+	if (state === "stopped") {
+		delete players["spotify"];
+		if (currentMetadata.playerName === "spotify") currentMetadata = {};
+	} else {
+		players["spotify"] = {
+			name: "spotify",
+			state: state,
+			supported_commands: ["play", "pause", "next", "previous"],
+			title: meta.title,
+			artist: meta.artist
+		};
+		currentMetadata = meta; // keep /api/track/metadata consistent
+	}
+	touch();
+	pushMetadataToBeocreate(meta);
+}
+
+// --- event stream --------------------------------------------------------------
+
+// Events that can change state or track; volume/seek/repeat/shuffle cannot.
+const SYNC_EVENTS = ["active", "inactive", "metadata", "playing", "paused", "stopped",
+	"not_playing", "playback_error", "playback_ready"];
+
+let eventsConn = null;
+let eventsConnecting = false;
+let reconnectTimer = null;
+let reconnectDelay = RECONNECT_MIN_MS;
+
+function connectEvents() {
+	if (eventsConn || eventsConnecting) return;
+	clearTimeout(reconnectTimer); reconnectTimer = null;
+	eventsConnecting = true;
+	const client = new WebSocketClient();
+	client.on("connectFailed", (err) => {
+		eventsConnecting = false;
+		log("event stream: connect failed:", err && err.message);
+		markSpotifyStopped();
+		scheduleReconnect();
+	});
+	client.on("connect", (conn) => {
+		eventsConnecting = false;
+		eventsConn = conn;
+		reconnectDelay = RECONNECT_MIN_MS;
+		console.log("[shim] connected to go-librespot events (" + GLR_EVENTS + ")");
+		syncSpotify(); // go-librespot sends no snapshot on connect
+		conn.on("message", (msg) => {
+			if (msg.type !== "utf8") return;
+			let ev = null;
+			try { ev = JSON.parse(msg.utf8Data); } catch (e) { return; }
+			log("event:", ev && ev.type);
+			if (ev && SYNC_EVENTS.indexOf(ev.type) !== -1) syncSpotify();
+		});
+		conn.on("error", (e) => log("event stream error:", e && e.message)); // "close" follows
+		conn.on("close", () => {
+			eventsConn = null;
+			console.log("[shim] go-librespot event stream closed - reconnecting");
+			markSpotifyStopped();
+			scheduleReconnect();
+		});
+	});
+	client.connect(GLR_EVENTS);
+}
+
+function scheduleReconnect() {
+	if (reconnectTimer) return;
+	reconnectTimer = setTimeout(() => { reconnectTimer = null; connectEvents(); }, reconnectDelay);
+	reconnectDelay = Math.min(reconnectDelay * 2, RECONNECT_MAX_MS);
 }
 
 // Forward a transport command to go-librespot.
@@ -212,7 +279,9 @@ function forwardTransport(command, callback) {
 	if (!glrCmd) return callback(false);
 	httpJSON("POST", GLR_API + "/player/" + glrCmd, null, (err, code) => {
 		if (err) { log("transport to go-librespot failed:", err.message); return callback(false); }
-		setTimeout(pollSpotify, 250); // reflect the new state quickly
+		// The resulting state change arrives as an event. If the stream is down
+		// (go-librespot just came back), don't wait for the backoff.
+		if (!eventsConn) connectEvents();
 		callback(code >= 200 && code < 300);
 	});
 }
@@ -259,7 +328,7 @@ function handle(req, res) {
 		if (urlPath === "/api/volume") {
 			return getVolumePercent((percent) => sendJSON(res, 200, percent == null ? {} : { percent: percent }));
 		}
-		if (urlPath === "/health" || urlPath === "/") return sendJSON(res, 200, { status: "ok", players: Object.keys(players), last_updated: lastUpdated });
+		if (urlPath === "/health" || urlPath === "/") return sendJSON(res, 200, { status: "ok", players: Object.keys(players), last_updated: lastUpdated, spotify_events: !!eventsConn });
 	}
 
 	if (method === "POST") {
@@ -303,8 +372,14 @@ server.on("error", (e) => {
 
 server.listen(PORT, HOST, () => {
 	console.log("[shim] AudioControl2 shim listening on http://" + HOST + ":" + PORT);
-	setInterval(pollSpotify, SPOTIFY_POLL_MS);  // poll the Spotify state
+	connectEvents();
 });
 
-process.on("SIGTERM", () => server.close(() => process.exit(0)));
-process.on("SIGINT", () => server.close(() => process.exit(0)));
+// The event stream is deliberately not closed first: its "close" handler would
+// report Spotify as stopped although only the shim restarts.
+function shutdown() {
+	server.close(() => process.exit(0));
+	setTimeout(() => process.exit(0), 2000).unref(); // keep-alive clients
+}
+process.on("SIGTERM", shutdown);
+process.on("SIGINT", shutdown);
