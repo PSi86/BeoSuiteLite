@@ -190,4 +190,4 @@ Pi (Raspberry Pi OS Lite): reachable on the local network by its hostname or DHC
 - `deploy/` — deployment artifacts (see table); incl. `hifiberry/` (apt keyring) and the vendored, patched `beo-extensions/sound/index.js`
 - `dsp/` — DSP program (EEPROM image as XML)
 - `tests/` — local end‑to‑end test of the audiocontrol shim against a fake go‑librespot/Beocreate (`cd tests && npm ci && npm test`; no Pi or Spotify account needed)
-- `_old_/` — reference material (old ChatGPT chat, moOde v9 port); **gitignored**
+- `_old_/` — local reference material (earlier notes, moOde v9 port); **gitignored**
