@@ -157,8 +157,10 @@ recovers from faults automatically, logging every step (`journalctl -u dsp-watch
 
 - **Health check:** `sigmatcpserver` active · DSP answers over REST with the expected
   program **checksum** (taken from the installed program `/var/lib/hifiberry/dspprogram.xml`,
-  so a program installed via the UI is not mistaken for a fault) · the `DSPVolume` ALSA
-  control exists · the Beocreate 2 UI serves on `:80`.
+  so a program installed via the UI is not mistaken for a fault; verified every 5 min —
+  it reads the program over SPI and floods the journal, the checks in between only
+  probe REST `/version`) · the `DSPVolume` ALSA control exists · the Beocreate 2 UI
+  serves on `:80`.
 - **Debounce:** a failed check is confirmed once after 15 s before anything is restarted,
   so a manual restart or package upgrade that is still starting up does not trigger a heal.
 - **Escalation:** unhealthy → **restart `sigmatcpserver` + `beocreate2`** (a `sigmatcpserver`
