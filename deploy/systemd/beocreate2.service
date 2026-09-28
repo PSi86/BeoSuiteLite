@@ -7,8 +7,8 @@ Requires=sigmatcpserver.service
 Type=simple
 User=root
 WorkingDirectory=/opt/beocreate/beo-system
-# Produktion: kein Debug-Flag. Für Diagnose "v" (Stufe 1) anhängen; NICHT "vv"
-# (Stufe 2) — dessen Volume-Spam löst journald-Ratelimiting aus.
+# Production: no debug flag. For diagnosis append "v" (level 1); NOT "vv"
+# (level 2) — its volume spam triggers journald rate limiting.
 ExecStart=/usr/bin/node --require /opt/beocreate/beo-guard.js /opt/beocreate/beo-system/beo-server.js
 Restart=on-failure
 RestartSec=3

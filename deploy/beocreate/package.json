@@ -1,0 +1,13 @@
+{
+  "dependencies": {
+    "aplay": "^1.2.0",
+    "dnssd2": "^1.0.0",
+    "eventemitter3": "^3.1.2",
+    "express": "^4.22.2",
+    "node-fetch": "^2.7.0",
+    "underscore": "^1.13.8",
+    "websocket": "^1.0.35",
+    "wireless-tools": "^0.19.0",
+    "xml-js": "^1.6.11"
+  }
+}

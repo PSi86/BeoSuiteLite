@@ -26,7 +26,11 @@
 set -euo pipefail
 
 REPO="$(cd "$(dirname "$0")" && pwd)"
-GLR_VERSION="v0.7.4"
+GLR_VERSION="v0.10.2"
+GLR_SHA256="800b174f066624edf37caec8266fd08e914e6fd837b2c92a4042aa21c0bafa4d"  # go-librespot_linux_arm64.tar.gz
+# Upstream Beocreate 2 is frozen (last commit 2021-03-16); pin it for reproducible installs.
+BEOCREATE_COMMIT="1afe3d701cc1947b8225f45c03f674ff4aed1814"
+HBDSP_VERSION="1.5.5"   # hifiberry-dsp version verified with this setup
 DSP_PROFILE="beocreate-universal-11.xml"
 SAFE_VOLUME_PCT="40"
 DSP_CHECKSUM_EXPECTED="97C9C5A88582888D111259BF70D6D79E"
@@ -95,7 +99,10 @@ phase_dsp_backend() {
 	echo "deb [signed-by=/usr/share/keyrings/hifiberry-archive-keyring.gpg] http://debianrepo.hifiberry.com ${codename} main" \
 		> /etc/apt/sources.list.d/hifiberry.list
 	apt-get update -y
-	apt-get install -y hifiberry-dsp
+	if ! apt-get install -y --allow-downgrades "hifiberry-dsp=$HBDSP_VERSION"; then
+		warn "hifiberry-dsp $HBDSP_VERSION is not in the repo any more — installing the current version (untested with this setup)."
+		apt-get install -y hifiberry-dsp
+	fi
 
 	info "sigmatcpserver override: enable SigmaTCP :8086 + DSPVolume (--alsa --enable-rest)"
 	install -d /etc/systemd/system/sigmatcpserver.service.d
@@ -110,16 +117,24 @@ phase_beocreate() {
 	log "Phase 2/5 — Beocreate 2 UI"
 	local src=/tmp/beocreate-create
 	rm -rf "$src"
-	info "Cloning bang-olufsen/create (upstream Beocreate 2, frozen)"
-	git clone --depth 1 https://github.com/bang-olufsen/create "$src"
+	info "Fetching bang-olufsen/create @ ${BEOCREATE_COMMIT:0:7} (upstream Beocreate 2, frozen)"
+	install -d "$src"
+	curl -fsSL "https://codeload.github.com/bang-olufsen/create/tar.gz/$BEOCREATE_COMMIT" \
+		| tar -xz -C "$src" --strip-components=1
 
 	install -d /opt/beocreate
 	cp -a "$src"/Beocreate2/. /opt/beocreate/
 	cp -a "$src"/beocreate_essentials /opt/beocreate/beocreate_essentials
 
-	info "npm dependencies (+ Express 4 pin; Express 5 crashes beo-server)"
-	( cd /opt/beocreate/beo-system && npm install --no-audit --no-fund \
-		&& npm install --no-audit --no-fund express@^4.18 node-fetch@2 )
+	# One node_modules at /opt/beocreate, where beo-system/, beo-extensions/* and
+	# beocreate_essentials/ all resolve it. Upstream has no package.json there, so
+	# ours carries the union of what the enabled extensions require (xml-js,
+	# websocket, dnssd2, ...) with Express pinned to 4 (Express 5 crashes
+	# beo-server); the lockfile makes it reproducible.
+	info "npm dependencies (npm ci from the pinned lockfile)"
+	install -m0644 "$REPO/deploy/beocreate/package.json"      /opt/beocreate/package.json
+	install -m0644 "$REPO/deploy/beocreate/package-lock.json" /opt/beocreate/package-lock.json
+	( cd /opt/beocreate && npm ci --no-audit --no-fund )
 
 	info "Applying BeoSuiteLite deltas (guard, patched sound/toslink, spotify source, configs)"
 	install -m0644 "$REPO/deploy/opt-beocreate/beo-guard.js" /opt/beocreate/beo-guard.js
@@ -135,11 +150,20 @@ phase_beocreate() {
 	# The upstream login menu is gone; drop its now-unused settings page cruft if present:
 	rm -f /opt/beocreate/beo-extensions/spotify/spotifyd-*.js 2>/dev/null || true
 
+	# Only seeded on first install: Beocreate writes user settings into these
+	# files, so a re-run must not reset them. system.json is the exception — it
+	# holds no user settings, and cardFeatures/extension allowlist must match.
 	info "System configuration (/etc/beocreate)"
 	install -d /etc/beocreate
-	install -m0644 "$REPO"/deploy/etc-beocreate/system.json  /etc/beocreate/system.json
-	install -m0644 "$REPO"/deploy/etc-beocreate/sound.json   /etc/beocreate/sound.json
-	install -m0644 "$REPO"/deploy/etc-beocreate/toslink.json /etc/beocreate/toslink.json
+	install -m0644 "$REPO"/deploy/etc-beocreate/system.json /etc/beocreate/system.json
+	local f
+	for f in sound.json toslink.json; do
+		if [ -e "/etc/beocreate/$f" ]; then
+			info "keeping existing /etc/beocreate/$f"
+		else
+			install -m0644 "$REPO/deploy/etc-beocreate/$f" "/etc/beocreate/$f"
+		fi
+	done
 
 	info "DSP profile into place"
 	install -d /opt/beocreate/beo-dsp-programs
@@ -155,14 +179,18 @@ phase_beocreate() {
 phase_go_librespot() {
 	log "Phase 3/5 — go-librespot (Spotify Connect)"
 	install -d /opt/go-librespot
-	if [ ! -x /opt/go-librespot/go-librespot ]; then
+	# The binary has no --version flag, so the installed version is tracked in VERSION.
+	if [ ! -x /opt/go-librespot/go-librespot ] || [ "$(cat /opt/go-librespot/VERSION 2>/dev/null)" != "$GLR_VERSION" ]; then
 		info "Downloading go-librespot ${GLR_VERSION} (arm64)"
 		curl -fsSL -o /tmp/go-librespot.tar.gz \
 			"https://github.com/devgianlu/go-librespot/releases/download/${GLR_VERSION}/go-librespot_linux_arm64.tar.gz"
-		tar -xzf /tmp/go-librespot.tar.gz -C /opt/go-librespot go-librespot
-		chmod +x /opt/go-librespot/go-librespot
+		echo "$GLR_SHA256  /tmp/go-librespot.tar.gz" | sha256sum -c - >/dev/null \
+			|| die "go-librespot download does not match the pinned SHA-256."
+		tar -xzf /tmp/go-librespot.tar.gz -C /tmp go-librespot
+		install -m0755 /tmp/go-librespot /opt/go-librespot/go-librespot
+		echo "$GLR_VERSION" > /opt/go-librespot/VERSION
 	else
-		info "go-librespot binary already present"
+		info "go-librespot ${GLR_VERSION} already installed"
 	fi
 
 	info "Config for user '$TARGET_USER' at $TARGET_HOME/.config/go-librespot"

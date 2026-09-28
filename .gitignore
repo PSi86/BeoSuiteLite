@@ -3,3 +3,6 @@
 
 # local tooling state
 /.claude/
+
+# test dependencies
+node_modules/

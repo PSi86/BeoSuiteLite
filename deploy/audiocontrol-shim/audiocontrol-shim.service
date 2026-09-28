@@ -10,6 +10,11 @@ User=root
 ExecStart=/usr/bin/node /opt/beocreate/audiocontrol-shim/shim.js
 Restart=on-failure
 RestartSec=2
+# Loopback only: Beocreate calls the shim via 127.0.1.1:81, and the shim itself
+# only talks to go-librespot and Beocreate on 127.0.0.1. Nothing on the LAN needs
+# the (unauthenticated) transport API.
+IPAddressAllow=localhost
+IPAddressDeny=any
 
 [Install]
 WantedBy=multi-user.target
