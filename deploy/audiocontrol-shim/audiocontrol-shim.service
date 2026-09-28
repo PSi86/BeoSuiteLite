@@ -5,11 +5,45 @@ Wants=sigmatcpserver.service
 
 [Service]
 Type=simple
-# amixer (DSPVolume) needs access to the sound card - root like beocreate2/sigmatcpserver.
-User=root
 ExecStart=/usr/bin/node /opt/beocreate/audiocontrol-shim/shim.js
 Restart=on-failure
 RestartSec=2
+
+# Unprivileged: a transient system user, the "audio" group for amixer
+# (/dev/snd/controlC*), and only the capability to bind the privileged port 81
+# that Beocreate expects the audiocontrol2 API on.
+DynamicUser=yes
+SupplementaryGroups=audio
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+
+# Filesystem/devices: read-only system, only ALSA devices visible.
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+DevicePolicy=closed
+DeviceAllow=char-alsa rw
+UMask=0077
+
+# Kernel/process isolation. MemoryDenyWriteExecute stays off: Node's JIT needs it.
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+ProtectProc=invisible
+ProcSubset=pid
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+SystemCallFilter=@system-service
+SystemCallFilter=~@privileged @resources
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
 # Loopback only: Beocreate calls the shim via 127.0.1.1:81, and the shim itself
 # only talks to go-librespot and Beocreate on 127.0.0.1. Nothing on the LAN needs
 # the (unauthenticated) transport API.

@@ -123,7 +123,7 @@ The DSP program (`beocreate-universal-11.xml`) resides **in the board's EEPROM**
 | `systemd/beocreate2.service` | `/etc/systemd/system/` | Beocreate 2 UI (Node, as root); `After/Wants audiocontrol-shim`; without debug flag (production). |
 | `systemd/sigmatcpserver.service.d/override.conf` | `/etc/systemd/system/sigmatcpserver.service.d/` | Flags override (8086 + DSPVolume) |
 | `audiocontrol-shim/shim.js` | `/opt/beocreate/audiocontrol-shim/` | audiocontrol2 replacement on `:81` + go‑librespot integration (events/push/transport) |
-| `audiocontrol-shim/audiocontrol-shim.service` | `/etc/systemd/system/` | systemd unit for the shim (as root, `enable`d) |
+| `audiocontrol-shim/audiocontrol-shim.service` | `/etc/systemd/system/` | systemd unit for the shim (`enable`d): unprivileged `DynamicUser` + group `audio` (for `amixer`), only `CAP_NET_BIND_SERVICE` for port 81, sandboxed (`systemd-analyze security`: 1.5), loopback only |
 | `dsp-watchdog/dsp-watchdog.sh` + `.service` | `/opt/beocreate/dsp-watchdog/` + `/etc/systemd/system/` | runtime self‑healing watchdog (heal → reboot → degraded) |
 | `go-librespot/config.yml` | `~pi/.config/go-librespot/` | Spotify Connect config (avahi, plughw, API :3678, safe volume) |
 | `go-librespot/go-librespot.service` | `/etc/systemd/system/` | Service (user `pi`, `enable`d); binary `v0.10.2` arm64 to `/opt/go-librespot/` (version in `VERSION`) |
